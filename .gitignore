@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node / frontend build artifacts
+node_modules/
+frontend/dist/
+
+# Runtime data (downloads, settings, cookies)
+data/
+downloads/
+backend/data
+backend/downloads
+
+# Test / scratch
+*.log
+/tmp/
+
+# Trellis local-only (from .trellis/.gitignore)
+.trellis/.developer
+.trellis/.current-task
+.trellis/.runtime/
+.trellis/.ralph-state.json
+.trellis/.agents/
+.trellis/.agent-log
+.trellis/.session-id
+.trellis/.plan-log
+
+# OS
+.DS_Store

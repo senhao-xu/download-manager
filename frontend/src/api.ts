@@ -1,0 +1,78 @@
+import type { CookieCheckResult, InfoResponse, SettingsState, TestResult } from './types'
+
+async function postJSON(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+async function readError(r: Response): Promise<string> {
+  try {
+    const j = await r.json()
+    return j.detail || `Request failed (${r.status})`
+  } catch {
+    return `Request failed (${r.status})`
+  }
+}
+
+export async function fetchInfo(url: string): Promise<InfoResponse> {
+  const r = await postJSON('/api/info', { url })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function startDownload(url: string, quality: string): Promise<string> {
+  const r = await postJSON('/api/download', { url, quality })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
+export async function startBatch(urls: string[], quality: string, zip: boolean = false): Promise<string> {
+  const r = await postJSON('/api/download-batch', { urls, quality, zip })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
+// ---- Settings ----
+
+export async function getSettings(): Promise<SettingsState> {
+  const r = await fetch('/api/settings')
+  if (!r.ok) throw new Error('Failed to load settings')
+  return r.json()
+}
+
+export async function updateSettings(proxy: string, js_runtimes: string): Promise<SettingsState> {
+  const r = await postJSON('/api/settings', { proxy, js_runtimes })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function uploadCookies(content: string): Promise<void> {
+  const r = await fetch('/api/settings/cookies', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/plain' },
+    body: content,
+  })
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function clearCookies(): Promise<void> {
+  const r = await fetch('/api/settings/cookies', { method: 'DELETE' })
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function testConnection(url: string): Promise<TestResult> {
+  const r = await postJSON('/api/settings/test', { url })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function checkCookies(url: string): Promise<CookieCheckResult> {
+  const r = await postJSON('/api/settings/check-cookies', { url })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}

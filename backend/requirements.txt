@@ -1,0 +1,10 @@
+# Backend dependencies for the YouTube download website.
+# NOTE: yt-dlp itself is installed separately as a nightly pre-release
+# (`pip install --pre -U yt-dlp`) because stable is stale and breaks against
+# YouTube changes. See Dockerfile / README.
+yt-dlp-ejs
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+aiofiles>=24.1
+curl_cffi>=0.7
