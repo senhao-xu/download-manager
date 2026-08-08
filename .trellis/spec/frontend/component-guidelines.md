@@ -1,59 +1,57 @@
-# Component Guidelines
+# Frontend Component Guidelines
 
 > How components are built in this project.
 
----
-
 ## Overview
 
-<!--
-Document your project's component conventions here.
-
-Questions to answer:
-- What component patterns do you use?
-- How are props defined?
-- How do you handle composition?
-- What accessibility standards apply?
--->
-
-(To be filled by the team)
-
----
+Function components + hooks (React 18). No class components, no component
+libraries (no MUI/Antd) - plain HTML elements + a hand-written CSS stylesheet.
+All text goes through `t()` (i18n).
 
 ## Component Structure
 
-<!-- Standard structure of a component file -->
+```tsx
+import { useState } from 'react'
+import { useLang } from './i18n'
 
-(To be filled by the team)
+export function Thing({ url, onClose }: { url: string; onClose: () => void }) {
+  const { t } = useLang()
+  const [x, setX] = useState(false)
+  return <div className="thing">{t('thingLabel')}</div>
+}
+```
 
----
+- Hooks first, then handlers, then JSX.
+- Destructure props in the parameter list with an inline type.
 
 ## Props Conventions
 
-<!-- How props should be defined and typed -->
-
-(To be filled by the team)
-
----
+- Inline typed destructuring (no separate `interface Props` unless reused).
+- Callbacks named `onClose`, `onSave`, `onClick` - verb + past/imperative.
+- Booleans for flags (`disabled`, `open`); never string `"true"`.
 
 ## Styling Patterns
 
-<!-- How styles are applied (CSS modules, styled-components, Tailwind, etc.) -->
-
-(To be filled by the team)
-
----
+- **One global stylesheet** (`styles.css`) using CSS custom properties
+  (`--bg`, `--panel`, `--accent`, ...) defined on `:root` (dark) and
+  `:root[data-theme="light"]` (light).
+- **`className` with `kebab-case`.** State variants via extra class:
+  `<div className={\`card job ${job.status}\`}>`.
+- **No inline `style=`** except dynamic values (progress bar `width`).
+- Theme toggle sets `data-theme` on `<html>` (via `useTheme`); CSS does the rest.
 
 ## Accessibility
 
-<!-- A11y requirements and patterns -->
-
-(To be filled by the team)
-
----
+- Every interactive element is a real `<button>` / `<a>` / `<input>` (not a
+  clickable `<div>`).
+- Icon-only buttons get a `title=` (e.g. the ⚙/☀/中 buttons).
+- `<label>` wraps its `<input>` (checkboxes/selects).
 
 ## Common Mistakes
 
-<!-- Component-related mistakes your team has made -->
-
-(To be filled by the team)
+- Hardcoding a string instead of `t('key')` + an entry in `i18n.tsx` (both
+  `zh` and `en`).
+- Forgetting `download_urls: []` when constructing a `JobStatus` locally (TS
+  will flag it - keep the type in sync).
+- Using `:has-text("☀")` selectors in tests - emoji matching is flaky; select
+  by position (`.toolbar .icon-btn`).nth(1) instead.

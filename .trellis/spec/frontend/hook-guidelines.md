@@ -1,51 +1,51 @@
-# Hook Guidelines
+# Frontend Hook Guidelines
 
 > How hooks are used in this project.
 
----
-
 ## Overview
 
-<!--
-Document your project's hook conventions here.
-
-Questions to answer:
-- What custom hooks do you have?
-- How do you handle data fetching?
-- What are the naming conventions?
-- How do you share stateful logic?
--->
-
-(To be filled by the team)
-
----
+React's built-in hooks (`useState`, `useEffect`, `useRef`, `useContext`) plus
+two custom hooks in `i18n.tsx`: `useLang()` and `useTheme()`. No data-fetching
+library (no React Query/SWR).
 
 ## Custom Hook Patterns
 
-<!-- How to create and structure custom hooks -->
+- **`useLang()`** - reads the `LangContext` (lang, setLang, `t`). Call in any
+  component that renders translated text.
+- **`useTheme()`** - returns `{ theme, toggle }`; sets `data-theme` on
+  `<html>` via `useEffect` and persists to `localStorage`.
 
-(To be filled by the team)
-
----
+A new custom hook lives in `i18n.tsx` (if it's a global concern) or inline in
+its component (if it's local). Don't create a `hooks/` folder for one-off hooks.
 
 ## Data Fetching
 
-<!-- How data fetching is handled (React Query, SWR, etc.) -->
+Plain `fetch` wrapped in `api.ts` functions:
 
-(To be filled by the team)
+```ts
+export async function fetchInfo(url: string): Promise<InfoResponse> {
+  const r = await postJSON('/api/info', { url })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+```
 
----
+Components call these in async handlers (`onGetInfo`, `runTest`, ...) and catch
+errors into local state. No `useEffect`-on-mount fetching except
+`SettingsModal` (loads settings when opened).
 
 ## Naming Conventions
 
-<!-- Hook naming rules (use*, etc.) -->
-
-(To be filled by the team)
-
----
+- `useThing` - returns an object of values/actions: `useLang()` ->
+  `{ lang, setLang, t }`.
+- Event handlers: `onVerb` (`onGetInfo`, `onDownloadBatch`, `runTest`).
+- Refs: `thingRef` (`esRef`, `triggeredRef`).
 
 ## Common Mistakes
 
-<!-- Hook-related mistakes your team has made -->
-
-(To be filled by the team)
+- Fetching in `useEffect` on mount when it should be on a user action (causes
+  redundant calls / race with the URL input).
+- Not closing an `EventSource` in the `useEffect` cleanup (or in `resetJob`) -
+  stale streams keep updating a replaced job.
+- Re-deriving `download_urls` from `download_url` in state instead of inline at
+  render time.

@@ -1,51 +1,35 @@
-# Database Guidelines
+# Backend Database Guidelines
 
 > Database patterns and conventions for this project.
 
----
-
 ## Overview
 
-<!--
-Document your project's database conventions here.
+**There is no database.** All state is in-memory and on the local filesystem:
 
-Questions to answer:
-- What ORM/query library do you use?
-- How are migrations managed?
-- What are the naming conventions for tables/columns?
-- How do you handle transactions?
--->
+| State | Location | Notes |
+|---|---|---|
+| Active jobs | `_jobs: dict[job_id, Job]` in `jobs.py` | in-memory; lost on restart |
+| Downloaded files | `DATA_DIR/downloads/<job_id>/` | TTL-cleaned by `storage` |
+| User settings | `DATA_DIR/settings.json` | cookies/proxy/js_runtimes |
+| YouTube cookies | `DATA_DIR/cookies.txt` | Netscape format, user-pasted |
 
-(To be filled by the team)
+This is intentional for a personal/self-hosted tool - no DB ops, no migrations,
+trivial backup (copy `DATA_DIR`).
 
----
+## If a DB Is Ever Needed
 
-## Query Patterns
+If restart-safety or history becomes a requirement (deferred item in the PRD),
+the migration path is:
 
-<!-- How should queries be written? Batch operations? -->
+- Jobs -> SQLite (`sqlite3` stdlib, no ORM needed) or Redis.
+- Settings -> SQLite (replace `settings.json`).
+- Keep the in-memory `Job` as the hot cache; persist on transition.
 
-(To be filled by the team)
-
----
-
-## Migrations
-
-<!-- How to create and run migrations -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- Table names, column names, index names -->
-
-(To be filled by the team)
-
----
+Do not introduce an ORM for a single-table use case; `sqlite3` + SQL is enough.
 
 ## Common Mistakes
 
-<!-- Database-related mistakes your team has made -->
-
-(To be filled by the team)
+- Treating the in-memory `Job` as durable - it isn't. A restart drops all
+  active jobs (the file on disk remains until TTL).
+- Writing to `settings.json` without the lock (`settings._lock`) - the SSE
+  reader and the writer can race.
