@@ -1,4 +1,4 @@
-import type { CookieCheckResult, InfoResponse, SettingsState, TestResult } from './types'
+import type { CookieCheckResult, HistoryList, InfoResponse, SettingsState, TestResult } from './types'
 
 async function postJSON(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
@@ -32,6 +32,13 @@ export async function startDownload(url: string, quality: string): Promise<strin
 
 export async function startBatch(urls: string[], quality: string, zip: boolean = false): Promise<string> {
   const r = await postJSON('/api/download-batch', { urls, quality, zip })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
+export async function startHttpDownload(urls: string[]): Promise<string> {
+  const r = await postJSON('/api/download-http', { urls })
   if (!r.ok) throw new Error(await readError(r))
   const j = await r.json()
   return j.job_id as string
@@ -74,5 +81,13 @@ export async function testConnection(url: string): Promise<TestResult> {
 export async function checkCookies(url: string): Promise<CookieCheckResult> {
   const r = await postJSON('/api/settings/check-cookies', { url })
   if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+// ---- History ----
+
+export async function getHistory(): Promise<HistoryList> {
+  const r = await fetch('/api/history')
+  if (!r.ok) throw new Error('Failed to load history')
   return r.json()
 }

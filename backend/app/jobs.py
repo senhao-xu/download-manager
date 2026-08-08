@@ -12,12 +12,14 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from yt_dlp.utils import DownloadError
 
 from .config import settings
-from . import downloader, storage
+from . import downloader, history, http_dl, storage
 from .schemas import JobStatus
+from .storage import media_type
 
 logger = logging.getLogger("jobs")
 
@@ -128,11 +130,45 @@ def start_batch(urls: list[str], quality: str, zip_mode: bool = False) -> Job:
     return job
 
 
+def start_http(urls: list[str]) -> Job:
+    """Start an HTTP relay download job for one or more direct URLs."""
+    job = create_job()
+    job.total = len(urls)
+    _executor.submit(_run_http, job, urls)
+    return job
+
+
 def _set(job: Job, **kw):
     with _lock:
         for k, v in kw.items():
             setattr(job, k, v)
         job.updated = time.time()
+
+
+def _record_history(job: Job, kind: str, source: str | None,
+                    path: str, filename: str, mime: str | None) -> None:
+    """Append a history record for one completed file.
+
+    Failure to record is logged but never re-raised: a history write must not
+    break a download. `mime` is derived via `storage.media_type(path)`.
+    """
+    try:
+        sz = Path(path).stat().st_size
+    except OSError:
+        sz = None
+    try:
+        history.append({
+            "id": job.id,
+            "kind": kind,
+            "title": job.title,
+            "source": source,
+            "filename": filename,
+            "path": path,
+            "size": sz,
+            "mime": mime,
+        })
+    except Exception:
+        logger.exception("failed to record history for job %s", job.id)
 
 
 def _run_single(job: Job, url: str, quality: str):
@@ -164,6 +200,7 @@ def _run_single(job: Job, url: str, quality: str):
             files=[(str(f), name)],
             download_url=f"/api/files/{job.id}",
         )
+        _record_history(job, "youtube", url, str(f), name, media_type(str(f)))
     except Exception as e:
         logger.exception("single download failed for job %s", job.id)
         _set(job, status="error", error=_friendly_error(e), phase="error")
@@ -211,6 +248,10 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
                 files=[],
                 download_url=f"/api/files/{job.id}",
             )
+            _record_history(
+                job, "youtube", urls[0] if urls else None,
+                str(zip_path), "playlist.zip", media_type(str(zip_path)),
+            )
         else:
             # return each file directly as mp4 (no zip)
             _set(
@@ -223,6 +264,59 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
                 result_filename=None,
                 download_url=None,
             )
+            for path, name in saved:
+                _record_history(
+                    job, "youtube", None, path, name, media_type(path),
+                )
     except Exception as e:
         logger.exception("batch download failed for job %s", job.id)
+        _set(job, status="error", error=_friendly_error(e), phase="error")
+
+
+def _run_http(job: Job, urls: list[str]):
+    """HTTP relay worker. Mirrors the non-zip batch path: each URL becomes one
+    file served via an indexed ``/api/files/{id}/{i}`` URL. No zip for HTTP.
+
+    ``job.files`` stays the 2-tuple ``(path, filename)`` shape so the schema and
+    the file-serving routes are unchanged; the MIME goes to history only.
+    """
+    total = len(urls)
+    _set(job, status="running", phase="starting", total=total, current=0)
+    d = storage.job_dir(job.id)
+    saved: list = []  # (path, display_filename)
+
+    try:
+        for i, url in enumerate(urls):
+            _set(job, current=i, phase=f"downloading {i + 1}/{total}")
+            base = (i / total) * 100.0 if total else 0.0
+            span = (100.0 / total) if total else 100.0
+
+            def hook(ev, base=base, span=span):
+                if ev.get("status") == "downloading":
+                    t = ev.get("total_bytes") or 0
+                    dn = ev.get("downloaded_bytes", 0)
+                    sub = (dn / t) if t else 0
+                    _set(job, progress=min(99.5, base + span * sub))
+                elif ev.get("status") == "finished":
+                    _set(job, progress=min(99.5, base + span))
+
+            name, path, _size, mime = http_dl.download_sync(url, d, hook)
+            saved.append((str(path), name))
+            _record_history(job, "http", url, str(path), name, mime)
+
+        _set(
+            job,
+            status="done",
+            progress=100.0,
+            phase="done",
+            files=saved,
+            # Single file -> direct URL + result_path so the non-indexed
+            # /api/files/{id} route serves it (mirrors _run_single). Batch ->
+            # indexed URLs via snapshot() (result_path stays None).
+            result_path=(saved[0][0] if len(saved) == 1 else None),
+            result_filename=(saved[0][1] if len(saved) == 1 else None),
+            download_url=(f"/api/files/{job.id}" if len(saved) == 1 else None),
+        )
+    except Exception as e:
+        logger.exception("http download failed for job %s", job.id)
         _set(job, status="error", error=_friendly_error(e), phase="error")

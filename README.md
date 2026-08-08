@@ -108,9 +108,12 @@ Most YouTube-related settings are edited in the **Settings UI** (persisted to
 | POST | `/api/info` | `{url}` | Video formats or playlist entries |
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
+| POST | `/api/download-http` | `{urls[]}` | `{job_id}` (HTTP relay download) |
 | GET | `/api/jobs/{id}` | - | Job status snapshot |
 | GET | `/api/jobs/{id}/events` | - | SSE progress stream |
 | GET | `/api/files/{id}` | - | The downloaded file or zip |
+| GET | `/api/files/{id}/{index}` | - | One file from a multi-file job |
+| GET | `/api/history` | - | Past downloads with on-disk availability |
 | GET | `/api/settings` | - | Current settings (no cookie content) |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | Updated settings |
 | PUT | `/api/settings/cookies` | raw `cookies.txt` text | `{cookies_configured}` |
@@ -119,6 +122,20 @@ Most YouTube-related settings are edited in the **Settings UI** (persisted to
 | POST | `/api/settings/check-cookies` | `{url}` | `{state, title, detail}` cookie-availability check |
 
 `quality` is `"best"` (default) or a height like `"1080"`.
+
+## Features
+
+- **Tabs** - a **YouTube** tab (paste a video/playlist URL, pick quality,
+  download) and an **HTTP** tab (paste one or more direct HTTP(S) links; the
+  server stream-downloads them through itself as a relay and serves the files,
+  with live progress). The selected tab is remembered.
+- **Preview** - completed video/audio downloads play in-page (and images for the
+  HTTP tab) without re-downloading.
+- **History** - every completed download is recorded to `<DATA_DIR>/history.jsonl`
+  and listed in the History panel; still-on-disk files can be re-previewed /
+  re-downloaded, expired ones are greyed out. History survives restarts.
+- **Theme** - dark / light / **system** (follows the OS preference and updates
+  live); language toggle 中文 / English. Choices are remembered.
 
 ## Legal
 

@@ -15,6 +15,34 @@ def job_dir(job_id: str):
     return d
 
 
+def media_type(path: str) -> str:
+    """Content-Type for a downloaded file by extension.
+
+    Shared by the file-serving routes and the history recorder (which stores
+    the mime alongside the path so the frontend can pick a preview element).
+    """
+    p = path.lower()
+    if p.endswith(".zip"):
+        return "application/zip"
+    if p.endswith(".mp4"):
+        return "video/mp4"
+    if p.endswith(".webm"):
+        return "video/webm"
+    if p.endswith(".mkv"):
+        return "video/x-matroska"
+    if p.endswith(".mov"):
+        return "video/quicktime"
+    if p.endswith(".m4a"):
+        return "audio/mp4"
+    if p.endswith(".mp3"):
+        return "audio/mpeg"
+    if p.endswith(".ogg"):
+        return "audio/ogg"
+    if p.endswith(".opus"):
+        return "audio/opus"
+    return "application/octet-stream"
+
+
 def cleanup_expired():
     """Remove job dirs older than TTL_MINUTES. Safe to run on a background thread."""
     now = time.time()

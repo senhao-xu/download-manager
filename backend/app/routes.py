@@ -1,16 +1,20 @@
 """HTTP API routes."""
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from . import downloader, jobs
+from . import downloader, history, jobs
 from . import settings as app_settings
 from .schemas import (
     BatchRequest,
     CookieCheckResult,
     DownloadRequest,
+    HistoryEntry,
+    HistoryList,
+    HttpDownloadRequest,
     InfoRequest,
     InfoResponse,
     JobCreated,
@@ -19,26 +23,12 @@ from .schemas import (
     TestRequest,
     TestResult,
 )
+from .storage import media_type
 from yt_dlp.utils import DownloadError
 
 router = APIRouter(prefix="/api")
 
 _ZIP_MEDIA = {"application/zip", "video/mp4", "video/webm", "audio/mpeg"}
-
-
-def _media_type(path: str) -> str:
-    p = path.lower()
-    if p.endswith(".zip"):
-        return "application/zip"
-    if p.endswith(".mp4"):
-        return "video/mp4"
-    if p.endswith(".webm"):
-        return "video/webm"
-    if p.endswith(".m4a"):
-        return "audio/mp4"
-    if p.endswith(".mp3"):
-        return "audio/mpeg"
-    return "application/octet-stream"
 
 
 @router.get("/healthz")
@@ -67,6 +57,22 @@ async def post_download_batch(req: BatchRequest):
     if not req.urls:
         raise HTTPException(status_code=400, detail="No URLs selected.")
     job = jobs.start_batch(req.urls, req.quality, req.zip)
+    return JobCreated(job_id=job.id)
+
+
+@router.post("/download-http", response_model=JobCreated)
+def post_download_http(req: HttpDownloadRequest):
+    """Stream-download one or more direct HTTP(S) URLs (server-as-relay)."""
+    cleaned = [u.strip() for u in req.urls if u.strip()]
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="No URLs provided.")
+    bad = [u for u in cleaned if not u.lower().startswith(("http://", "https://"))]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid URL(s) (must start with http:// or https://): {bad[:3]}",
+        )
+    job = jobs.start_http(cleaned)
     return JobCreated(job_id=job.id)
 
 
@@ -110,7 +116,7 @@ def get_file(job_id: str):
         raise HTTPException(status_code=404, detail="File not ready.")
     return FileResponse(
         job.result_path,
-        media_type=_media_type(job.result_path),
+        media_type=media_type(job.result_path),
         filename=job.result_filename or "download",
     )
 
@@ -124,7 +130,28 @@ def get_file_indexed(job_id: str, index: int):
     if index < 0 or index >= len(job.files):
         raise HTTPException(status_code=404, detail="File not found.")
     path, filename = job.files[index]
-    return FileResponse(path, media_type=_media_type(path), filename=filename)
+    return FileResponse(path, media_type=media_type(path), filename=filename)
+
+
+@router.get("/history", response_model=HistoryList)
+def get_history():
+    """List past downloads, newest-first. `available` reflects on-disk presence."""
+    items: list[HistoryEntry] = []
+    for rec in history.list_all():
+        path = rec.get("path")
+        available = bool(path) and Path(path).exists()
+        items.append(HistoryEntry(
+            id=rec.get("id", ""),
+            kind=rec.get("kind", ""),
+            title=rec.get("title"),
+            source=rec.get("source"),
+            filename=rec.get("filename"),
+            size=rec.get("size"),
+            mime=rec.get("mime"),
+            created=rec.get("created", 0),
+            available=available,
+        ))
+    return HistoryList(items=items)
 
 
 # ---- Settings (cookies + proxy + JS runtime), user-editable via UI ----

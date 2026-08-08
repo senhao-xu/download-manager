@@ -6,6 +6,7 @@ __pycache__/
 # Node / frontend build artifacts
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # Runtime data (downloads, settings, cookies)
 data/

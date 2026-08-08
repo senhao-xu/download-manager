@@ -1,6 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
 export type Lang = 'zh' | 'en'
+// The user's theme *choice*. 'system' means follow prefers-color-scheme and
+// react to OS changes at runtime; 'dark'/'light' are explicit overrides.
+export type ThemeChoice = 'dark' | 'light' | 'system'
+// The concrete theme actually applied to <html data-theme>.
 export type Theme = 'dark' | 'light'
 
 type Vars = Record<string, string | number>
@@ -67,8 +71,27 @@ const translations: Record<Lang, Record<string, string>> = {
     startFailed: 'Failed to start download',
     selectAtLeastOne: 'Select at least one video.',
     jobLost: 'Job lost.',
-    themeToggle: 'Toggle theme',
+    themeToggle: 'Theme: dark / light / system',
+    themeDark: 'Dark',
+    themeLight: 'Light',
+    themeSystem: 'System',
     switchLang: 'Switch language',
+    tabYouTube: 'YouTube',
+    tabHTTP: 'HTTP',
+    httpComingSoon: 'HTTP download is coming soon.',
+    httpTabTitle: 'HTTP Download',
+    httpPlaceholder: 'One direct URL per line…\nhttps://example.com/file.mp4\nhttps://example.com/image.png',
+    downloadHttp: 'Download',
+    noUrls: 'Enter at least one http(s) URL.',
+    httpHint: 'Files are downloaded through this server (relay). Each line must start with http:// or https://.',
+    preview: 'Preview',
+    previewNotSupported: 'This file type cannot be previewed in-page. Use Download instead.',
+    history: 'History',
+    expired: 'expired',
+    reDownload: 'Download',
+    kindYoutube: 'YouTube',
+    kindHttp: 'HTTP',
+    noHistory: 'No downloads yet.',
   },
   zh: {
     appTitle: 'YouTube 下载器',
@@ -131,8 +154,27 @@ const translations: Record<Lang, Record<string, string>> = {
     startFailed: '开始下载失败',
     selectAtLeastOne: '至少选择一个视频。',
     jobLost: '任务丢失。',
-    themeToggle: '切换主题',
+    themeToggle: '主题：深色 / 浅色 / 跟随系统',
+    themeDark: '深色',
+    themeLight: '浅色',
+    themeSystem: '跟随系统',
     switchLang: '切换语言',
+    tabYouTube: 'YouTube',
+    tabHTTP: 'HTTP',
+    httpComingSoon: 'HTTP 下载功能即将上线。',
+    httpTabTitle: 'HTTP 下载',
+    httpPlaceholder: '每行一个直链…\nhttps://example.com/file.mp4\nhttps://example.com/image.png',
+    downloadHttp: '下载',
+    noUrls: '请至少输入一个 http(s) 链接。',
+    httpHint: '文件通过本服务器中转下载。每行须以 http:// 或 https:// 开头。',
+    preview: '预览',
+    previewNotSupported: '此文件类型无法在页面内预览，请使用下载。',
+    history: '历史',
+    expired: '已失效',
+    reDownload: '下载',
+    kindYoutube: 'YouTube',
+    kindHttp: 'HTTP',
+    noHistory: '还没有下载记录。',
   },
 }
 
@@ -161,15 +203,51 @@ export function useLang() {
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const stored = (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) as Theme | null
-    if (stored === 'dark' || stored === 'light') return stored
-    return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+  // The user's selection: 'dark' | 'light' | 'system'.
+  const [choice, setChoice] = useState<ThemeChoice>(() => {
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('theme') : null
+    return stored === 'dark' || stored === 'light' || stored === 'system' ? stored : 'system'
   })
+
+  // The concrete theme resolved from the choice (and, for 'system', the live OS
+  // preference). Subscribes to prefers-color-scheme changes so 'system' follows
+  // the OS at runtime without a reload.
+  const systemPrefersLight = () =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches
+  const [resolved, setResolved] = useState<Theme>(() =>
+    choice === 'system' ? (systemPrefersLight() ? 'light' : 'dark') : choice,
+  )
+
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('theme', theme)
-  }, [theme])
-  const toggle = () => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))
-  return { theme, toggle }
+    const apply = (c: ThemeChoice) => setResolved(c === 'system' ? (systemPrefersLight() ? 'light' : 'dark') : c)
+    apply(choice)
+    localStorage.setItem('theme', choice)
+    if (choice !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    const onChange = () => apply('system')
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [choice])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', resolved)
+  }, [resolved])
+
+  // Cycle: dark -> light -> system -> dark.
+  const cycle = () => setChoice((p) => (p === 'dark' ? 'light' : p === 'light' ? 'system' : 'dark'))
+  return { choice, theme: resolved, cycle }
+}
+
+export type Tab = 'youtube' | 'http'
+
+export function useTab() {
+  const [tab, setTabState] = useState<Tab>(() => {
+    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('tab')
+    return stored === 'http' ? 'http' : 'youtube'
+  })
+  const setTab = (next: Tab) => {
+    localStorage.setItem('tab', next)
+    setTabState(next)
+  }
+  return { tab, setTab }
 }

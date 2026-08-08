@@ -60,3 +60,19 @@ export interface CookieCheckResult {
   title: string | null
   detail: string | null
 }
+
+export interface HistoryEntry {
+  id: string
+  kind: string // "youtube" | "http"
+  title: string | null
+  source: string | null
+  filename: string | null
+  size: number | null
+  mime: string | null
+  created: number
+  available: boolean
+}
+
+export interface HistoryList {
+  items: HistoryEntry[]
+}

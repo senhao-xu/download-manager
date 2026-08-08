@@ -46,6 +46,10 @@ class BatchRequest(BaseModel):
     zip: bool = False
 
 
+class HttpDownloadRequest(BaseModel):
+    urls: list[str]
+
+
 class JobCreated(BaseModel):
     job_id: str
 
@@ -83,4 +87,20 @@ class CookieCheckResult(BaseModel):
     state: str
     title: str | None = None
     detail: str | None = None
+
+
+class HistoryEntry(BaseModel):
+    id: str
+    kind: str  # "youtube" | "http"
+    title: str | None = None
+    source: str | None = None
+    filename: str | None = None
+    size: int | None = None
+    mime: str | None = None
+    created: float
+    available: bool = False
+
+
+class HistoryList(BaseModel):
+    items: list[HistoryEntry]
 
