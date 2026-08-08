@@ -14,7 +14,19 @@ selection of videos from a playlist. Paste a URL, pick a quality, download.
 
 ## Quick start (Docker)
 
+Pre-built image on GHCR:
+
 ```bash
+docker run -d -p 8000:8000 -v "$PWD/data:/data" \
+  -e DATA_DIR=/data -e DOWNLOAD_DIR=/data/downloads \
+  --name ytb-dl ghcr.io/senhao-xu/ytb-dl:latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/senhao-xu/ytb-dl.git
+cd ytb-dl
 docker compose up -d --build
 # open http://localhost:8000, then click Settings to add cookies/proxy for YouTube
 ```
