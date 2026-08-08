@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"frontend flat src/ layout, where new components/modules go"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"component structure, props, t() i18n, no hardcoded strings"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"local state + hooks patterns for tab/job/preview state"}
