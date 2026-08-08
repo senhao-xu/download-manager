@@ -86,31 +86,42 @@ exposure low. This is a user-owned risk posture, confirmed by the scale decision
 ## Requirements
 
 - Web UI: paste a YouTube URL (single video or playlist), trigger download.
-- Backend embeds yt-dlp (nightly) for metadata + download; ffmpeg + deno in the
-  runtime image.
+- Backend embeds yt-dlp (nightly) for metadata + download; ffmpeg + node>=22 in
+  the runtime image (node, not deno - deno 2.x / node<22 are "unsupported" by
+  yt-dlp-ejs for YouTube's JS challenge).
 - Single video: return available formats; user picks quality; download with live
   progress (0-100%) via SSE; serve the merged mp4; clean up after.
-- Playlist: list entries; user selects single/multiple/all; multi-select
-  downloads are zipped and served as one file; live per-file progress.
+- Playlist: list entries; user selects single/multiple/all. Default returns each
+  video as a separate mp4 (order-prefixed: `01 - title.mp4`); an optional "Package
+  as zip" toggle bundles them into one zip. Live per-file progress.
+- Settings UI: user configures YouTube cookies (cookies.txt paste), proxy, and JS
+  runtime from the web page; persisted under DATA_DIR, takes effect immediately.
+  Includes a cookie-availability check and a connection test.
+- Dark/light theme + zh/en language toggles, persisted.
 - Downloaded files are deleted after delivery or a TTL (disk stays bounded).
 - Graceful errors for invalid URLs, private/age-restricted content, or YouTube
   blocking (surface yt-dlp's error to the UI, no crash).
 
 ## Acceptance Criteria
 
-- [ ] Pasting a public video URL returns title + available formats within a few
+- [x] Pasting a public video URL returns title + available formats within a few
       seconds (`extract_info(download=False)`).
-- [ ] User can select a quality/format and start a download; UI shows live
+- [x] User can select a quality/format and start a download; UI shows live
       progress 0-100% via SSE.
-- [ ] Finished mp4 downloads and plays correctly (A/V merged via ffmpeg for
+- [x] Finished mp4 downloads and plays correctly (A/V merged via ffmpeg for
       1080p+).
-- [ ] Pasting a playlist URL lists its videos with per-item selection (single /
+- [x] Pasting a playlist URL lists its videos with per-item selection (single /
       multiple / all).
-- [ ] Multi-select playlist downloads produce a single zip containing the chosen
+- [x] Multi-select playlist downloads default to separate mp4 files (order-
+      prefixed); the optional zip toggle produces a single zip of the chosen
       videos; single-select downloads the file directly.
-- [ ] Invalid / unsupported URLs show a clear error, not a crash.
-- [ ] Files are deleted from disk after delivery or a TTL; disk does not grow
+- [x] Invalid / unsupported URLs show a clear error, not a crash.
+- [x] Files are deleted from disk after delivery or a TTL; disk does not grow
       unbounded across many uses.
+- [x] YouTube bot-wall is surfaced with an actionable message pointing to the
+      Settings UI; cookies + proxy configurable from the web page and verified
+      via a one-click check.
+- [x] Dark/light theme and zh/en language toggles work and persist.
 
 ## Out of Scope (v1)
 

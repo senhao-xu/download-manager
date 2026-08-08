@@ -7,15 +7,16 @@ serves a built React SPA. Downloads run in an in-process threadpool worker
 (yt-dlp is synchronous/blocking) with job IDs and SSE progress.
 
 ```
-Browser (React SPA)
+Browser (React SPA: i18n zh/en, dark/light theme, settings modal)
    |  JSON + SSE over HTTP
 FastAPI backend (uvicorn)
    |-- app.downloader  : yt-dlp wrapper (extract_info, download)  [threadpool]
-   |-- app.jobs        : in-memory job registry + worker + zip
+   |-- app.jobs        : in-memory job registry + worker (single / batch-mp4 / batch-zip)
    |-- app.storage     : temp dir + TTL cleanup
+   |-- app.settings    : persisted cookies + proxy + js_runtimes (DATA_DIR)
    |-- StaticFiles     : serves built frontend
-yt-dlp (nightly) + ffmpeg + deno  (system deps in image)
-./downloads/  (local disk, TTL-cleaned)
+yt-dlp (nightly) + ffmpeg + node>=22  (system deps in image)
+DATA_DIR/  (settings.json, cookies.txt, downloads/ - TTL-cleaned)
 ```
 
 ### Boundaries / modules
@@ -24,10 +25,11 @@ yt-dlp (nightly) + ffmpeg + deno  (system deps in image)
 |---|---|
 | `backend/app/main.py` | FastAPI app, CORS, routes, lifespan (starts cleanup task), mounts StaticFiles |
 | `backend/app/schemas.py` | Pydantic request/response models |
-| `backend/app/downloader.py` | yt-dlp wrapper: `extract_info(url)`, `download(url, format_id, hook, dest)`; always run in threadpool |
-| `backend/app/jobs.py` | `Job` model, in-memory `dict[job_id, Job]`, `ThreadPoolExecutor`, batch+zip worker |
+| `backend/app/downloader.py` | yt-dlp wrapper: `extract_info(url)`, `download(url, quality, hook, dest)`; always run in threadpool; before/after dir diff to avoid cross-file duplication |
+| `backend/app/jobs.py` | `Job` model, in-memory `dict[job_id, Job]`, `ThreadPoolExecutor`; single / batch-mp4 (order-prefixed names) / batch-zip workers |
 | `backend/app/storage.py` | temp dir per job, `cleanup_expired()` TTL sweep |
-| `backend/app/routes.py` | `/api/info`, `/api/download`, `/api/download-batch`, `/api/jobs/{id}`, `/api/jobs/{id}/events` (SSE), `/api/files/{id}` |
+| `backend/app/settings.py` | persisted `settings.json` + `cookies.txt`; `effective_opts()` merges UI settings over env fallbacks (cookiefile, proxy, `js_runtimes={'node':{}}`) |
+| `backend/app/routes.py` | `/api/info`, `/api/download`, `/api/download-batch`, `/api/jobs/{id}`, `/api/jobs/{id}/events` (SSE), `/api/files/{id}`, `/api/files/{id}/{index}`, `/api/settings*`, `/api/settings/check-cookies` |
 | `frontend/src/` | React app: URL input, format picker, playlist list+select, progress UI |
 
 ## Data Flow & Contracts
