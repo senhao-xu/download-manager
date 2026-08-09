@@ -14,11 +14,15 @@ FROM python:3.11-slim
 # System deps: ffmpeg/ffprobe (A/V merge), ca-certificates. Node.js >= 22 is
 # installed via NodeSource because Debian's apt nodejs (v20) is "unsupported" by
 # yt-dlp-ejs 0.8.0 for YouTube's JS challenge - node 22 is required.
+# curl/gnupg are build-only (needed to fetch the NodeSource setup script) and are
+# purged afterward to shrink the layer.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get purge -y --auto-remove gnupg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/nodesource.list
 
 WORKDIR /app
 

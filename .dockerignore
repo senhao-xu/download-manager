@@ -1,14 +1,31 @@
+# Python
 __pycache__/
 *.pyc
+**/__pycache__/
+backend/.venv/
 .venv/
+
+# Node / frontend build artifacts (built into the image via a build stage)
 node_modules/
 frontend/dist/
+
+# Runtime data (downloads, settings, cookies) - must NOT be baked into the image
+data/
+downloads/
+backend/data/
+backend/downloads/
+
+# Trellis / agent tooling (dev only)
 .git/
 .trellis/
 .codex/
 .opencode/
 .agents/
 .claude/
-data/
-downloads/
+.github/
+
+# Misc
 *.log
+*.tsbuildinfo
+.DS_Store
+README.md
