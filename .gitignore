@@ -34,6 +34,7 @@ backend/downloads
 .codex/
 .opencode/
 .trellis/
+.workbuddy/
 
 # OS
 .DS_Store
