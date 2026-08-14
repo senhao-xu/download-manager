@@ -111,6 +111,11 @@ const translations: Record<Lang, Record<string, string>> = {
     btHint: 'Downloads via BitTorrent (magnet or .torrent). The torrent is stopped once complete (no seeding).',
     kindBt: 'BT',
     githubLink: 'GitHub',
+    pause: 'Pause',
+    resume: 'Resume',
+    cancelDownload: 'Cancel',
+    paused: 'Paused',
+    cancelled: 'Cancelled',
   },
   zh: {
     appTitle: '下载管理器',
@@ -213,6 +218,11 @@ const translations: Record<Lang, Record<string, string>> = {
     btHint: '通过 BitTorrent 下载（磁力或 .torrent）。下载完成后即停止，不做种。',
     kindBt: 'BT',
     githubLink: 'GitHub',
+    pause: '暂停',
+    resume: '继续',
+    cancelDownload: '取消',
+    paused: '已暂停',
+    cancelled: '已取消',
   },
 }
 

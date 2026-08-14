@@ -18,6 +18,7 @@ from yt_dlp.utils import DownloadError
 
 from .config import settings
 from . import downloader, history, http_dl, bt_dl, storage
+from .errors import JobCancelled
 from .schemas import JobStatus
 from .storage import media_type
 
@@ -41,6 +42,11 @@ class Job:
     # individual files for non-zip batch: list of (path, display_filename)
     files: list = field(default_factory=list)
     updated: float = field(default_factory=time.time)
+    # Cancellation/pause signals. Set/cleared by route handlers (event-loop
+    # thread), polled by worker threads at download check points. threading.Event
+    # is itself thread-safe; they never appear in snapshots.
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    pause_event: threading.Event = field(default_factory=threading.Event)
 
 
 _jobs: dict[str, Job] = {}
@@ -64,31 +70,86 @@ def get_job(job_id: str) -> Job | None:
 
 
 def is_running(job_id: str) -> bool:
-    """True if a job with this id exists and is still running.
+    """True if a job with this id exists and is still active (not terminal).
 
-    Used by the TTL cleanup sweep to skip dirs whose download is in flight (e.g.
-    a slow BitTorrent job that exceeds TTL_MINUTES). job_id is the directory name
-    under DOWNLOAD_DIR, which matches the Job id.
+    ``paused`` counts as active so the TTL cleanup sweep protects a paused BT
+    job's partial files. Used by the TTL cleanup sweep; job_id is the directory
+    name under DOWNLOAD_DIR, which matches the Job id.
     """
     with _lock:
         j = _jobs.get(job_id)
-        return bool(j and j.status in ("queued", "running"))
+        return bool(j and j.status in ("queued", "running", "paused"))
+
+
+def _is_terminal(status: str) -> bool:
+    return status in ("done", "error", "cancelled")
 
 
 def list_active(kind: str | None = None) -> list[JobStatus]:
-    """Snapshots of all in-flight (queued/running) jobs, newest-updated first.
+    """Snapshots of all in-flight (queued/running/paused) jobs, newest-first.
 
     Used by ``GET /api/jobs`` so the frontend can restore live progress after a
-    page reload. ``kind`` ("youtube"|"http"|"bt") optionally filters; None
-    returns every active job. Terminal jobs are excluded - they live in history.
+    page reload - including paused BT jobs. ``kind`` ("youtube"|"http"|"bt")
+    optionally filters; None returns every active job. Terminal jobs are excluded
+    (they live in history, except cancelled which is dropped).
     """
     with _lock:
         matched = [
             j for j in _jobs.values()
-            if j.status in ("queued", "running") and (kind is None or j.kind == kind)
+            if j.status in ("queued", "running", "paused") and (kind is None or j.kind == kind)
         ]
     matched.sort(key=lambda j: j.updated, reverse=True)
     return [snapshot(j) for j in matched]
+
+
+# ---- Cancel / pause / resume control (called by route handlers) ----
+
+def request_cancel(job_id: str) -> Job | None:
+    """Signal a job to cancel. Idempotent: a no-op on terminal/missing jobs.
+
+    Returns the Job (or None if not found). The actual status transition happens
+    in the worker when it observes the event; setting the event on an already-
+    terminal job is harmless.
+    """
+    with _lock:
+        j = _jobs.get(job_id)
+        if j is None:
+            return None
+        j.cancel_event.set()
+        return j
+
+
+def request_pause(job_id: str) -> tuple[Job | None, str]:
+    """Signal a BT job to pause. Returns (job, code).
+
+    code is one of: ``not_found`` / ``wrong_kind`` (not BT) / ``no_op`` (status
+    not running or already paused) / ``ok``. Pause is honored only in the BT
+    download poll loop.
+    """
+    with _lock:
+        j = _jobs.get(job_id)
+        if j is None:
+            return None, "not_found"
+        if j.kind != "bt":
+            return j, "wrong_kind"
+        if j.status not in ("running", "paused"):
+            return j, "no_op"
+        j.pause_event.set()
+        return j, "ok"
+
+
+def request_resume(job_id: str) -> tuple[Job | None, str]:
+    """Clear a BT job's pause. Returns (job, code); same codes as request_pause."""
+    with _lock:
+        j = _jobs.get(job_id)
+        if j is None:
+            return None, "not_found"
+        if j.kind != "bt":
+            return j, "wrong_kind"
+        if j.status not in ("running", "paused"):
+            return j, "no_op"
+        j.pause_event.clear()
+        return j, "ok"
 
 
 def snapshot(job: Job) -> JobStatus:
@@ -116,6 +177,8 @@ def snapshot(job: Job) -> JobStatus:
 
 
 def _friendly_error(e: Exception) -> str:
+    if isinstance(e, JobCancelled):
+        return "Cancelled"
     msg = str(e).strip()
     low = msg.lower()
     if "sign in to confirm" in low or "not a bot" in low:
@@ -256,6 +319,8 @@ def _run_single(job: Job, url: str, quality: str):
     d = storage.job_dir(job.id)
 
     def hook(ev):
+        if job.cancel_event.is_set():
+            raise JobCancelled()
         st = ev.get("status")
         if st == "downloading":
             total = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
@@ -270,6 +335,8 @@ def _run_single(job: Job, url: str, quality: str):
             _set(job, progress=max(job.progress, 99.0), phase="processing (merging)")
 
     try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
         info, files = downloader.download_sync(url, quality, d, hook)
         f = files[0]
         name = _filename(_safe_base(info.get("title"), f.stem), f.suffix)
@@ -285,9 +352,14 @@ def _run_single(job: Job, url: str, quality: str):
             download_url=f"/api/files/{job.id}",
         )
         _record_history(job, "youtube", url, str(f), name, media_type(str(f)))
+    except JobCancelled:
+        _set(job, status="cancelled", phase="cancelled")
     except Exception as e:
-        logger.exception("single download failed for job %s", job.id)
-        _set(job, status="error", error=_friendly_error(e), phase="error")
+        if job.cancel_event.is_set():
+            _set(job, status="cancelled", phase="cancelled")
+        else:
+            logger.exception("single download failed for job %s", job.id)
+            _set(job, status="error", error=_friendly_error(e), phase="error")
 
 
 def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: str | None = None):
@@ -297,11 +369,17 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
     saved: list = []  # (path, display_filename)
 
     try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
         for i, url in enumerate(urls):
+            if job.cancel_event.is_set():
+                raise JobCancelled()
             _set(job, current=i, phase=f"downloading {i + 1}/{total}")
             base = (i / total) * 100.0 if total else 0.0
 
             def hook(ev, base=base, span=(100.0 / total if total else 100.0)):
+                if job.cancel_event.is_set():
+                    raise JobCancelled()
                 if ev.get("status") == "downloading":
                     t = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
                     done = ev.get("downloaded_bytes", 0)
@@ -357,9 +435,14 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
                 _record_history(
                     job, "youtube", None, path, name, media_type(path),
                 )
+    except JobCancelled:
+        _set(job, status="cancelled", phase="cancelled")
     except Exception as e:
-        logger.exception("batch download failed for job %s", job.id)
-        _set(job, status="error", error=_friendly_error(e), phase="error")
+        if job.cancel_event.is_set():
+            _set(job, status="cancelled", phase="cancelled")
+        else:
+            logger.exception("batch download failed for job %s", job.id)
+            _set(job, status="error", error=_friendly_error(e), phase="error")
 
 
 def _run_http(job: Job, urls: list[str]):
@@ -375,7 +458,11 @@ def _run_http(job: Job, urls: list[str]):
     saved: list = []  # (path, display_filename)
 
     try:
+        if job.cancel_event.is_set():
+            raise JobCancelled()
         for i, url in enumerate(urls):
+            if job.cancel_event.is_set():
+                raise JobCancelled()
             _set(job, current=i, phase=f"downloading {i + 1}/{total}")
             base = (i / total) * 100.0 if total else 0.0
             span = (100.0 / total) if total else 100.0
@@ -393,7 +480,7 @@ def _run_http(job: Job, urls: list[str]):
                 elif ev.get("status") == "finished":
                     _set(job, progress=min(99.5, base + span))
 
-            name, path, _size, mime = http_dl.download_sync(url, d, hook)
+            name, path, _size, mime = http_dl.download_sync(url, d, hook, cancel_event=job.cancel_event)
             saved.append((str(path), name))
             _record_history(job, "http", url, str(path), name, mime)
 
@@ -410,9 +497,14 @@ def _run_http(job: Job, urls: list[str]):
             result_filename=(saved[0][1] if len(saved) == 1 else None),
             download_url=(f"/api/files/{job.id}" if len(saved) == 1 else None),
         )
+    except JobCancelled:
+        _set(job, status="cancelled", phase="cancelled")
     except Exception as e:
-        logger.exception("http download failed for job %s", job.id)
-        _set(job, status="error", error=_friendly_error(e), phase="error")
+        if job.cancel_event.is_set():
+            _set(job, status="cancelled", phase="cancelled")
+        else:
+            logger.exception("http download failed for job %s", job.id)
+            _set(job, status="error", error=_friendly_error(e), phase="error")
 
 
 def _run_bt(job: Job, source: str):
@@ -428,7 +520,8 @@ def _run_bt(job: Job, source: str):
     d = storage.job_dir(job.id)
 
     def hook(ev):
-        if ev.get("status") == "downloading":
+        st = ev.get("status")
+        if st == "downloading":
             t = ev.get("total_bytes") or 0
             dn = ev.get("downloaded_bytes", 0)
             sub = (dn / t) if t else 0
@@ -437,11 +530,20 @@ def _run_bt(job: Job, source: str):
             if fn:
                 kw["title"] = fn
             _set(job, **kw)
-        elif ev.get("status") == "finished":
+        elif st == "finished":
             _set(job, progress=99.5, phase="finishing")
+        elif st == "paused":
+            _set(job, status="paused", phase="paused")
+        elif st == "resumed":
+            _set(job, status="running", phase="downloading")
 
     try:
-        name, path, size, mime = bt_dl.download_sync(source, d, hook)
+        if job.cancel_event.is_set():
+            raise JobCancelled()
+        name, path, size, mime = bt_dl.download_sync(
+            source, d, hook,
+            cancel_event=job.cancel_event, pause_event=job.pause_event,
+        )
 
         if path.is_file():
             # Single-file torrent: serve directly.
@@ -481,6 +583,11 @@ def _run_bt(job: Job, source: str):
             )
             for fp_str, fname in saved:
                 _record_history(job, "bt", source, fp_str, fname, media_type(fp_str))
+    except JobCancelled:
+        _set(job, status="cancelled", phase="cancelled")
     except Exception as e:
-        logger.exception("bt download failed for job %s", job.id)
-        _set(job, status="error", error=_friendly_error(e), phase="error")
+        if job.cancel_event.is_set():
+            _set(job, status="cancelled", phase="cancelled")
+        else:
+            logger.exception("bt download failed for job %s", job.id)
+            _set(job, status="error", error=_friendly_error(e), phase="error")

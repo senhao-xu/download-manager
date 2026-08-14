@@ -62,7 +62,7 @@ class JobCreated(BaseModel):
 
 class JobStatus(BaseModel):
     id: str
-    status: str  # queued | running | done | error
+    status: str  # queued | running | paused | done | error | cancelled
     progress: float  # 0..100
     current: int | None = None
     total: int | None = None

@@ -61,6 +61,25 @@ export async function listActiveJobs(kind?: string): Promise<JobStatus[]> {
   return r.json()
 }
 
+// ---- Download control: cancel (all kinds) / pause+resume (BT only) ----
+// The worker observes the signal at its check points and transitions the job
+// status; the next SSE snapshot carries the real state back to the UI.
+
+export async function cancelJob(jobId: string): Promise<void> {
+  const r = await postJSON(`/api/jobs/${jobId}/cancel`, {})
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function pauseJob(jobId: string): Promise<void> {
+  const r = await postJSON(`/api/jobs/${jobId}/pause`, {})
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function resumeJob(jobId: string): Promise<void> {
+  const r = await postJSON(`/api/jobs/${jobId}/resume`, {})
+  if (!r.ok) throw new Error(await readError(r))
+}
+
 export async function startBtMagnet(magnet: string): Promise<string> {
   const r = await postJSON('/api/download-bt', { magnet })
   if (!r.ok) throw new Error(await readError(r))

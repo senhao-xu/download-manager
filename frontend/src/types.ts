@@ -37,7 +37,7 @@ export interface InfoResponse {
   entries: Entry[]
 }
 
-export type JobState = 'queued' | 'running' | 'done' | 'error'
+export type JobState = 'queued' | 'running' | 'paused' | 'cancelled' | 'done' | 'error'
 
 export interface JobStatus {
   id: string
