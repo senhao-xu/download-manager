@@ -1,19 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useLang } from './i18n'
-import { JobView } from './JobView'
 import { HistoryList } from './HistoryList'
 import { startHttpDownload } from './api'
-import type { ActiveJobProps, JobStatus } from './types'
+import type { JobStatus, TabJobProps } from './types'
 
-export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
+export function HttpTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
   const { t } = useLang()
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [historyRefresh, setHistoryRefresh] = useState(0)
-  const doneId = active?.status === 'done' ? active.id : null
-  useEffect(() => {
-    if (doneId) setHistoryRefresh((n) => n + 1)
-  }, [doneId])
 
   async function onStart(e: React.FormEvent) {
     e.preventDefault()
@@ -22,13 +16,13 @@ export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
       setError(t('noUrls'))
       return
     }
-    reset()
     setError(null)
     try {
       await startJob(
         () => startHttpDownload(urls),
         {
           id: '',
+          kind: 'http',
           status: 'queued',
           progress: 0,
           current: 0,
@@ -45,8 +39,6 @@ export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
     }
   }
 
-  const running = !!active && active.status === 'running'
-
   return (
     <>
       <form className="url-form http-form" onSubmit={onStart}>
@@ -58,14 +50,13 @@ export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
           rows={5}
           autoFocus
         />
-        <button type="submit" className="primary" disabled={running}>
+        <button type="submit" className="primary">
           {t('downloadHttp')}
         </button>
       </form>
       <p className="hint">{t('httpHint')}</p>
       {error && <div className="error">{error}</div>}
-      {active && <JobView job={active} />}
-      <HistoryList kind="http" refreshKey={historyRefresh} />
+      <HistoryList kind="http" activeJobs={activeJobs} refreshKey={refreshKey} />
     </>
   )
 }

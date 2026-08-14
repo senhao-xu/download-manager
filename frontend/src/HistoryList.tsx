@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useLang } from './i18n'
 import { getHistory, deleteHistory } from './api'
-import type { HistoryEntry, OwnerTab } from './types'
+import type { HistoryEntry, JobStatus, OwnerTab } from './types'
 import { triggerDownload } from './JobView'
+import { JobView } from './JobView'
 
 const PAGE_SIZE = 10
 
@@ -58,10 +59,19 @@ function fmtRelative(ts: number, lang: string): string {
 
 /**
  * Inline, paginated download history for a single tab, filtered by `kind`.
- * `refreshKey` is bumped by the owning tab when its active job reaches `done`,
- * so a freshly completed download appears here without a manual reload.
+ *
+ * Active (in-flight) jobs of this tab's kind render as live-progress rows ABOVE
+ * the history list; completed downloads render below. `refreshKey` (bumped by
+ * the shared store when a job goes terminal) triggers a history refetch so a
+ * freshly completed download appears. While an active job is still shown (even
+ * briefly after it finishes), its history copy is hidden by id-dedupe so there
+ * is never a duplicate row.
  */
-export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: number }) {
+export function HistoryList({ kind, activeJobs, refreshKey }: {
+  kind: OwnerTab
+  activeJobs: JobStatus[]
+  refreshKey: number
+}) {
   const { t, lang } = useLang()
   const [items, setItems] = useState<HistoryEntry[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -72,8 +82,8 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // Re-fetch when the page, kind, or the parent's refreshKey changes. Resetting
-  // to page 1 on refreshKey keeps the user on a stable view after a new entry.
+  // Re-fetch when the page, kind, or the store's refreshKey changes. refreshKey
+  // bumps when a job finishes, surfacing the new history entry.
   function fetchPage() {
     let cancelled = false
     setError(null)
@@ -92,6 +102,11 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
   }
 
   useEffect(fetchPage, [kind, page, refreshKey, t])
+
+  // Hide history rows whose job is still shown as an active row (covers the
+  // brief window where a finished job is still pinned on top before dismiss).
+  const activeIds = new Set(activeJobs.map((j) => j.id))
+  const historyItems = (items ?? []).filter((it) => !activeIds.has(it.id))
 
   function kindLabel(k: string): string {
     return k === 'http' ? t('kindHttp') : k === 'bt' ? t('kindBt') : t('kindYoutube')
@@ -121,21 +136,35 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
   }
 
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const hasActive = activeJobs.length > 0
 
   return (
     <div className="history-inline">
-      <h3 className="history-inline-head">{t('historyTitle')} <span className="history-count">({total})</span></h3>
+      <h3 className="history-inline-head">
+        {t('historyTitle')} <span className="history-count">({total})</span>
+        {hasActive && <span className="history-count"> · {t('activeCount', { n: activeJobs.length })}</span>}
+      </h3>
+
+      {hasActive && (
+        <ul className="active-jobs-list">
+          {activeJobs.map((job) => (
+            <li key={job.id} className="active-job-row">
+              <JobView job={job} />
+            </li>
+          ))}
+        </ul>
+      )}
 
       {error && <div className="error">{error}</div>}
 
-      {items && items.length === 0 && (
+      {!hasActive && historyItems.length === 0 && (
         <p className="hint">{t('noHistory')}</p>
       )}
 
-      {items && items.length > 0 && (
+      {historyItems.length > 0 && (
         <>
           <ul className="history-list">
-            {items.map((it) => {
+            {historyItems.map((it) => {
               const src = `/api/files/${it.id}`
               return (
                 <li key={it.id} className={`history-row${it.available ? '' : ' expired'}`}>

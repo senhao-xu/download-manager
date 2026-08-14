@@ -104,7 +104,7 @@ async def post_download_bt_file(file: UploadFile = File(...)):
     here is fine.
     """
     # Create the job first so we have a temp dir to write the .torrent into.
-    job = jobs.create_job()
+    job = jobs.create_job("bt")
     dest = job_dir(job.id)
     raw = await file.read()
     if not raw:
@@ -119,6 +119,16 @@ async def post_download_bt_file(file: UploadFile = File(...)):
     torrent_path.write_bytes(raw)
     jobs.start_bt_with_job(job, str(torrent_path))
     return JobCreated(job_id=job.id)
+
+
+@router.get("/jobs", response_model=list[JobStatus])
+def list_jobs(kind: str | None = None):
+    """All in-flight (queued/running) jobs, newest first.
+
+    Lets the frontend restore live progress after a page reload. ``kind``
+    ("youtube"|"http"|"bt") optionally filters to one tab.
+    """
+    return jobs.list_active(kind=kind)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
