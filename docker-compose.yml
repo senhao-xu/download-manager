@@ -1,9 +1,10 @@
 services:
   app:
-    build:
-      context: .
-      network: host
+    # Prebuilt image published to GHCR by CI on every push to main.
+    # Source: https://github.com/senhao-xu/download-manager/pkgs/container/download-manager
+    image: ghcr.io/senhao-xu/download-manager:latest
     container_name: download-manager
+    pull_policy: always
     ports:
       - "8000:8000"
     environment:
