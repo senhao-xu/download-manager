@@ -1,15 +1,19 @@
-# YouTube Downloader
+# Download Manager
 
-A self-hosted web app to download YouTube videos (selectable quality) or a
-selection of videos from a playlist. Paste a URL, pick a quality, download.
+A self-hosted web app to download from multiple sources: direct HTTP(S) links,
+YouTube videos/playlists (selectable quality), and BitTorrent (magnet / .torrent).
+Paste a URL, pick options, download.
 
 - **Backend**: Python + FastAPI, embedding [yt-dlp](https://github.com/yt-dlp/yt-dlp) (nightly) as a library.
 - **Frontend**: React (Vite) SPA, served by the backend.
 - **Downloads** run in an in-process threadpool with live progress (SSE); playlist
-  selections are zipped. Files are TTL-cleaned from disk.
-- **Settings UI**: configure YouTube cookies + proxy from the web page (no env editing),
-  with a one-click cookie-availability check.
-- **Theme & language**: dark/light theme toggle and 中文/English toggle (top-right);
+  selections are zipped; HTTP relay and BitTorrent have their own worker pools.
+  Files are TTL-cleaned from disk.
+- **Tabs**: an **HTTP** tab (server-as-relay direct downloads), a **YouTube** tab
+  (cookies/proxy configured inline, with automatic cookie-availability checks),
+  and a **BT** tab (magnet / .torrent via libtorrent).
+- **History**: per-tab, paginated (10 per page), inline under each tab.
+- **Theme & language**: dark/light/system theme toggle and 中文/English toggle (top-right);
   choices are remembered.
 
 ## Quick start (Docker)
@@ -19,16 +23,16 @@ Pre-built image on GHCR:
 ```bash
 docker run -d -p 8000:8000 -v "$PWD/data:/data" \
   -e DATA_DIR=/data -e DOWNLOAD_DIR=/data/downloads \
-  --name ytb-dl ghcr.io/senhao-xu/ytb-dl:latest
+  --name download-manager ghcr.io/senhao-xu/download-manager:latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/senhao-xu/ytb-dl.git
-cd ytb-dl
+git clone https://github.com/senhao-xu/download-manager.git
+cd download-manager
 docker compose up -d --build
-# open http://localhost:8000, then click Settings to add cookies/proxy for YouTube
+# open http://localhost:8000, then open the YouTube tab to add cookies/proxy
 ```
 
 Downloads are stored under `./data/downloads/` and auto-deleted after `TTL_MINUTES`.
@@ -39,10 +43,12 @@ YouTube blocks non-residential / datacenter IPs with a "Sign in to confirm you'r
 not a bot" wall, and is unreachable from some regions. For YouTube to work,
 configure **both** in the web UI:
 
-1. Open the app and click **Settings** (top-right).
+1. Open the app and switch to the **YouTube** tab, then expand the **Settings**
+   block above the URL box.
 2. **Cookies** — export a `cookies.txt` from a logged-in YouTube browser session
    (use a "Get cookies.txt" browser extension), paste it into the Cookies box,
-   and **Save cookies**.
+   and **Save cookies**. Cookie availability is verified automatically after
+   saving (and whenever you enter the YouTube tab).
 3. **Proxy** — enter an HTTP/SOCKS proxy that can reach YouTube (e.g.
    `http://host.docker.internal:7890` for a proxy on the host) and **Save**.
 4. Click **Test** with a YouTube URL to verify.
@@ -86,8 +92,8 @@ cd frontend && npm run build      # outputs frontend/dist/, served by backend at
 
 ## Configuration
 
-Most YouTube-related settings are edited in the **Settings UI** (persisted to
-`DATA_DIR`). These env vars are defaults/fallbacks:
+Most YouTube-related settings are edited inline in the **YouTube** tab's Settings
+block (persisted to `DATA_DIR`). These env vars are defaults/fallbacks:
 
 | Env var | Default | Purpose |
 |---|---|---|

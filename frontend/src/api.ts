@@ -102,8 +102,12 @@ export async function checkCookies(url: string): Promise<CookieCheckResult> {
 
 // ---- History ----
 
-export async function getHistory(): Promise<HistoryList> {
-  const r = await fetch('/api/history')
+export async function getHistory(kind?: string, page: number = 1, pageSize: number = 10): Promise<HistoryList> {
+  const params = new URLSearchParams()
+  if (kind) params.set('kind', kind)
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
+  const r = await fetch(`/api/history?${params.toString()}`)
   if (!r.ok) throw new Error('Failed to load history')
   return r.json()
 }

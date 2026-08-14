@@ -107,4 +107,7 @@ class HistoryEntry(BaseModel):
 
 class HistoryList(BaseModel):
     items: list[HistoryEntry]
+    total: int = 0
+    page: int = 1
+    page_size: int = 10
 

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLang } from './i18n'
 import { JobView } from './JobView'
+import { HistoryList } from './HistoryList'
 import { startHttpDownload } from './api'
 import type { ActiveJobProps, JobStatus } from './types'
 
@@ -8,6 +9,11 @@ export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
   const { t } = useLang()
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [historyRefresh, setHistoryRefresh] = useState(0)
+  const doneId = active?.status === 'done' ? active.id : null
+  useEffect(() => {
+    if (doneId) setHistoryRefresh((n) => n + 1)
+  }, [doneId])
 
   async function onStart(e: React.FormEvent) {
     e.preventDefault()
@@ -59,6 +65,7 @@ export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
       <p className="hint">{t('httpHint')}</p>
       {error && <div className="error">{error}</div>}
       {active && <JobView job={active} />}
+      <HistoryList kind="http" refreshKey={historyRefresh} />
     </>
   )
 }

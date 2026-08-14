@@ -3,7 +3,7 @@ services:
     build:
       context: .
       network: host
-    container_name: ytb-dl
+    container_name: download-manager
     ports:
       - "8000:8000"
     environment:
@@ -12,7 +12,7 @@ services:
       - DOWNLOAD_DIR=/data/downloads
       - TTL_MINUTES=60
       - MAX_CONCURRENT=3
-      # Cookies + proxy for YouTube are configured in the web UI (Settings),
+      # Cookies + proxy for YouTube are configured inline in the YouTube tab,
       # persisted to /data. They are needed because YouTube blocks non-residential
       # IPs with a bot-detection wall. Env vars below are optional fallbacks:
       # - YTDLP_PROXY=http://host.docker.internal:7890

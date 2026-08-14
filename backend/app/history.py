@@ -60,3 +60,21 @@ def list_all() -> list[dict]:
     if out:
         logger.info("history loaded: %d records", len(out))
     return out
+
+
+def list_page(kind: str | None = None, page: int = 1, page_size: int = 10):
+    """Return a (page_records, total) slice of the newest-first records.
+
+    `kind` filters by the record's `kind` field ("youtube" | "http" | "bt");
+    a record with a missing/non-matching kind is excluded when a filter is set.
+    `page` is 1-indexed; `page_size` is clamped to [1, 100]. total is the count
+    AFTER filtering (so callers can render "page X / ceil(total/page_size)").
+    """
+    recs = list_all()
+    if kind:
+        recs = [r for r in recs if r.get("kind") == kind]
+    total = len(recs)
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    start = (page - 1) * page_size
+    return recs[start:start + page_size], total

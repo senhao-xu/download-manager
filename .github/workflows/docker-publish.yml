@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/senhao-xu/ytb-dl
+  IMAGE: ghcr.io/senhao-xu/download-manager
 
 jobs:
   build-and-push:

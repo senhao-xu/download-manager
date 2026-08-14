@@ -86,4 +86,7 @@ export interface HistoryEntry {
 
 export interface HistoryList {
   items: HistoryEntry[]
+  total: number
+  page: number
+  page_size: number
 }

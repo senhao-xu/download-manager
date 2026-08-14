@@ -175,10 +175,16 @@ def get_file_indexed(job_id: str, index: int):
 
 
 @router.get("/history", response_model=HistoryList)
-def get_history():
-    """List past downloads, newest-first. `available` reflects on-disk presence."""
+def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
+    """List past downloads, newest-first, filtered by `kind` and paginated.
+
+    `kind` is one of "youtube" | "http" | "bt" (None = all). `page` is
+    1-indexed; `page_size` defaults to 10 (clamped to [1, 100] in history).
+    `available` reflects on-disk presence.
+    """
+    recs, total = history.list_page(kind=kind, page=page, page_size=page_size)
     items: list[HistoryEntry] = []
-    for rec in history.list_all():
+    for rec in recs:
         path = rec.get("path")
         available = bool(path) and Path(path).exists()
         items.append(HistoryEntry(
@@ -192,7 +198,7 @@ def get_history():
             created=rec.get("created", 0),
             available=available,
         ))
-    return HistoryList(items=items)
+    return HistoryList(items=items, total=total, page=page, page_size=page_size)
 
 
 # ---- Settings (cookies + proxy + JS runtime), user-editable via UI ----

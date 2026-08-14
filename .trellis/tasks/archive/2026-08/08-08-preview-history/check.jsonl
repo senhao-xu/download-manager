@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"verify required patterns, no forbidden ones, review checklist"}
-{"file":".trellis/spec/backend/error-handling.md","reason":"error mapping expectations for the check pass"}
-{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"frontend quality checks + forbidden patterns"}
-{"file":".trellis/spec/frontend/type-safety.md","reason":"types.ts mirrors schemas.py; JobStatus shape stays in sync"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"history/job/SSE spans API+service+component layers; verify data flow consistency"}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"reuse JobView/useJobSubscription/history.append instead of duplicating"}

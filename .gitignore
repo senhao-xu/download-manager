@@ -28,5 +28,12 @@ backend/downloads
 .trellis/.session-id
 .trellis/.plan-log
 
+# Agent / tooling config (dev-only, not part of the app)
+.agents/
+.claude/
+.codex/
+.opencode/
+.trellis/
+
 # OS
 .DS_Store

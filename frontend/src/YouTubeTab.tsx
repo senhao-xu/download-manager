@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ActiveJobProps, InfoResponse, JobStatus } from './types'
 import { fetchInfo, startDownload, startBatch } from './api'
 import { useLang } from './i18n'
 import { JobView } from './JobView'
+import { YouTubeSettings } from './YouTubeSettings'
+import { HistoryList } from './HistoryList'
 
 function fmtDuration(s: number | null): string {
   if (s == null) return ''
@@ -22,6 +24,13 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
   const [quality, setQuality] = useState('best')
   const [zip, setZip] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  // Bumped when the active job reaches `done` so the inline history refetches
+  // and shows the just-completed download.
+  const [historyRefresh, setHistoryRefresh] = useState(0)
+  const doneId = active?.status === 'done' ? active.id : null
+  useEffect(() => {
+    if (doneId) setHistoryRefresh((n) => n + 1)
+  }, [doneId])
 
   function resetJob() {
     reset()
@@ -111,6 +120,8 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
 
   return (
     <>
+      <YouTubeSettings />
+
       <form className="url-form" onSubmit={onGetInfo}>
         <input
           type="text"
@@ -180,6 +191,7 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
       )}
 
       {active && <JobView job={active} />}
+      <HistoryList kind="youtube" refreshKey={historyRefresh} />
     </>
   )
 }

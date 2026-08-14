@@ -11,7 +11,7 @@ type Vars = Record<string, string | number>
 
 const translations: Record<Lang, Record<string, string>> = {
   en: {
-    appTitle: 'YouTube Downloader',
+    appTitle: 'Download Manager',
     subtitle: 'Paste a video or playlist URL · pick quality · download',
     settings: 'Settings',
     urlPlaceholder: 'https://www.youtube.com/watch?v=…  or  …/playlist?list=…',
@@ -87,6 +87,10 @@ const translations: Record<Lang, Record<string, string>> = {
     preview: 'Preview',
     previewNotSupported: 'This file type cannot be previewed in-page. Use Download instead.',
     history: 'History',
+    historyTitle: 'Recent downloads',
+    prevPage: 'Prev',
+    nextPage: 'Next',
+    page: 'Page {n} of {total}',
     expired: 'expired',
     reDownload: 'Download',
     kindYoutube: 'YouTube',
@@ -102,7 +106,7 @@ const translations: Record<Lang, Record<string, string>> = {
     kindBt: 'BT',
   },
   zh: {
-    appTitle: 'YouTube 下载器',
+    appTitle: '下载管理器',
     subtitle: '粘贴视频或播放列表链接 · 选画质 · 下载',
     settings: '设置',
     urlPlaceholder: 'https://www.youtube.com/watch?v=… 或 …/playlist?list=…',
@@ -178,6 +182,10 @@ const translations: Record<Lang, Record<string, string>> = {
     preview: '预览',
     previewNotSupported: '此文件类型无法在页面内预览，请使用下载。',
     history: '历史',
+    historyTitle: '最近的下载',
+    prevPage: '上一页',
+    nextPage: '下一页',
+    page: '第 {n} / {total} 页',
     expired: '已失效',
     reDownload: '下载',
     kindYoutube: 'YouTube',
@@ -259,7 +267,7 @@ export type Tab = 'youtube' | 'http' | 'bt'
 export function useTab() {
   const [tab, setTabState] = useState<Tab>(() => {
     const stored = typeof localStorage !== 'undefined' && localStorage.getItem('tab')
-    return stored === 'http' ? 'http' : stored === 'bt' ? 'bt' : 'youtube'
+    return stored === 'http' ? 'http' : stored === 'bt' ? 'bt' : stored === 'youtube' ? 'youtube' : 'http'
   })
   const setTab = (next: Tab) => {
     localStorage.setItem('tab', next)
