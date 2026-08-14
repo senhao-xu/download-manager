@@ -12,14 +12,16 @@ export default function App() {
   const themeIcon = choice === 'dark' ? '🌙' : choice === 'light' ? '☀' : '💻'
   const themeTitle = `${t('themeToggle')} (${t(choice === 'dark' ? 'themeDark' : choice === 'light' ? 'themeLight' : 'themeSystem')})`
 
-  // One active-job store at App level: the job + its SSE stream survive tab
-  // component mount/unmount, so switching tabs no longer drops an in-flight
-  // download. Each tab only renders the job it started (jobFor).
+  // One active-job store at App level: each tab's job + its SSE stream survive
+  // tab component mount/unmount, so switching tabs no longer drops an in-flight
+  // download. Tabs run concurrently and independently; each renders only its own
+  // job (jobFor). `reset` is bound to the current tab so a tab clearing its own
+  // job never clobbers a download running on another tab.
   const active = useActiveJob()
   const tabProps = {
     active: active.jobFor(tab),
     startJob: (starter: () => Promise<string>, initial: JobStatus) => active.start(tab, starter, initial),
-    reset: active.reset,
+    reset: () => active.reset(tab),
   }
 
   return (

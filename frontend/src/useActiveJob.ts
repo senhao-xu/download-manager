@@ -3,46 +3,63 @@ import type { JobStatus } from './types'
 import { triggerDownload } from './JobView'
 
 /**
- * Shared active-job store, instantiated ONCE at the App level so the job and its
- * SSE subscription survive tab component mount/unmount.
+ * Shared active-job store, instantiated ONCE at the App level so each tab's job
+ * and its SSE subscription survive tab component mount/unmount.
  *
- * Previously each tab owned its own `useState<JobStatus>` + `useJobSubscription`,
- * which were destroyed on unmount - switching tabs made an in-flight download
- * vanish from the UI (the backend kept running it). Lifting the state to App
- * means the `EventSource` (in a ref) and the `job` snapshot persist across tab
- * switches.
+ * Each tab owns an independent job + EventSource tracked by tab key, so starting
+ * a download in one tab never disturbs a download running in another. The job
+ * snapshots live in React state (so they re-render) and the `EventSource`s live
+ * in a ref (mutated, not rendered); both are at the App level, so a tab that
+ * unmounts while its download runs keeps progressing in the background, and the
+ * job is still there when the user switches back.
  *
- * There is a single active job at a time; `ownerTab` records which tab started it
- * so a tab only renders the job it owns.
+ * `reset` is tab-scoped: it clears only the calling tab's job/stream, so the
+ * "clear my previous job before starting a new one" pattern in each tab no
+ * longer clobbers downloads running on other tabs.
  */
 
 export type OwnerTab = 'youtube' | 'http' | 'bt'
 
+type JobMap = Record<OwnerTab, JobStatus | null>
+type EsMap = Record<OwnerTab, EventSource | null>
+// Per-tab job_id we have already auto-downloaded, so a restored `done` job
+// does not trigger a second (non-gesture) browser download.
+type AutoTriggeredMap = Record<OwnerTab, string | null>
+
+const EMPTY_JOBS: JobMap = { youtube: null, http: null, bt: null }
+const EMPTY_ES: EsMap = { youtube: null, http: null, bt: null }
+
 export function useActiveJob() {
-  const [job, setJob] = useState<JobStatus | null>(null)
-  const [ownerTab, setOwnerTab] = useState<OwnerTab | null>(null)
-  const esRef = useRef<EventSource | null>(null)
-  // job_id we have already auto-downloaded, so a restored `done` job does not
-  // trigger a second (non-gesture) browser download.
-  const autoTriggeredRef = useRef<string | null>(null)
+  const [jobs, setJobs] = useState<JobMap>(EMPTY_JOBS)
+  const esRef = useRef<EsMap>(EMPTY_ES)
+  const autoTriggeredRef = useRef<AutoTriggeredMap>({ youtube: null, http: null, bt: null })
 
-  // Close the stream when App unmounts (in practice: never, while the page lives).
-  useEffect(() => () => esRef.current?.close(), [])
+  // Close every stream when App unmounts (in practice: never, while the page lives).
+  useEffect(
+    () => () => {
+      (Object.keys(esRef.current) as OwnerTab[]).forEach((t) => esRef.current[t]?.close())
+    },
+    [],
+  )
 
-  function subscribe(jobId: string) {
-    esRef.current?.close()
+  function setJobFor(tab: OwnerTab, j: JobStatus | null) {
+    setJobs((prev) => ({ ...prev, [tab]: j }))
+  }
+
+  function subscribe(tab: OwnerTab, jobId: string) {
+    esRef.current[tab]?.close()
     const es = new EventSource(`/api/jobs/${jobId}/events`)
-    esRef.current = es
+    esRef.current[tab] = es
     es.onmessage = (ev) => {
       const j = JSON.parse(ev.data) as JobStatus
-      setJob(j)
+      setJobFor(tab, j)
       // Auto-download only a single-file job, once, on the original Start
-      // gesture's tick. Guarded by autoTriggeredRef so a job restored after it
+      // gesture's tick. Guarded per-tab by job_id so a job restored after it
       // finished (stream already closed) never re-triggers.
-      if (j.status === 'done' && autoTriggeredRef.current !== jobId) {
+      if (j.status === 'done' && autoTriggeredRef.current[tab] !== jobId) {
         const urls = j.download_urls?.length ? j.download_urls : (j.download_url ? [j.download_url] : [])
         if (urls.length === 1) {
-          autoTriggeredRef.current = jobId
+          autoTriggeredRef.current[tab] = jobId
           triggerDownload(urls[0])
         }
       }
@@ -64,33 +81,30 @@ export function useActiveJob() {
     starter: () => Promise<string>,
     initial: JobStatus,
   ): Promise<void> {
-    esRef.current?.close()
-    autoTriggeredRef.current = null
-    setOwnerTab(owner)
-    setJob(initial)
+    esRef.current[owner]?.close()
+    autoTriggeredRef.current[owner] = null
+    setJobFor(owner, initial)
     try {
       const jobId = await starter()
-      setJob({ ...initial, id: jobId })
-      subscribe(jobId)
+      setJobFor(owner, { ...initial, id: jobId })
+      subscribe(owner, jobId)
     } catch (err) {
       // Leave it to the caller's catch; clear our partial job.
-      setJob(null)
-      setOwnerTab(null)
+      setJobFor(owner, null)
       throw err
     }
   }
 
-  function reset() {
-    esRef.current?.close()
-    esRef.current = null
-    autoTriggeredRef.current = null
-    setJob(null)
-    setOwnerTab(null)
+  function reset(tab: OwnerTab) {
+    esRef.current[tab]?.close()
+    esRef.current[tab] = null
+    autoTriggeredRef.current[tab] = null
+    setJobFor(tab, null)
   }
 
-  /** The active job iff it was started by `tab`; otherwise null. */
+  /** The active job for `tab`, or null if it has none. */
   function jobFor(tab: OwnerTab): JobStatus | null {
-    return ownerTab === tab ? job : null
+    return jobs[tab]
   }
 
   return { jobFor, start, reset }

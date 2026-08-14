@@ -141,6 +141,14 @@ def _filename(base: str, ext: str, index: int | None = None, width: int = 2) -> 
     return f"{base}.{ext}" if index is None else f"{index:0{width}d} - {base}.{ext}"
 
 
+def _basename(p: str | None) -> str | None:
+    """Display name from a progress-hook `filename` (a full path, possibly .part)."""
+    if not p:
+        return None
+    from pathlib import Path
+    return Path(p).name
+
+
 def start_single(url: str, quality: str) -> Job:
     job = create_job()
     _executor.submit(_run_single, job, url, quality)
@@ -227,7 +235,11 @@ def _run_single(job: Job, url: str, quality: str):
             total = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
             done = ev.get("downloaded_bytes", 0)
             pct = (done / total * 99.0) if total else job.progress
-            _set(job, progress=max(job.progress, pct), phase="downloading")
+            kw = {"progress": max(job.progress, pct), "phase": "downloading"}
+            fn = ev.get("filename")
+            if fn:
+                kw["title"] = _basename(fn)
+            _set(job, **kw)
         elif st == "finished":
             _set(job, progress=max(job.progress, 99.0), phase="processing (merging)")
 
@@ -268,7 +280,11 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
                     t = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
                     done = ev.get("downloaded_bytes", 0)
                     sub = (done / t) if t else 0
-                    _set(job, progress=min(99.5, base + span * sub))
+                    kw = {"progress": min(99.5, base + span * sub)}
+                    fn = ev.get("filename")
+                    if fn:
+                        kw["title"] = _basename(fn)
+                    _set(job, **kw)
                 elif ev.get("status") == "finished":
                     _set(job, progress=min(99.5, base + span))
 
@@ -342,7 +358,11 @@ def _run_http(job: Job, urls: list[str]):
                     t = ev.get("total_bytes") or 0
                     dn = ev.get("downloaded_bytes", 0)
                     sub = (dn / t) if t else 0
-                    _set(job, progress=min(99.5, base + span * sub))
+                    kw = {"progress": min(99.5, base + span * sub)}
+                    fn = ev.get("filename")
+                    if fn:
+                        kw["title"] = fn
+                    _set(job, **kw)
                 elif ev.get("status") == "finished":
                     _set(job, progress=min(99.5, base + span))
 
@@ -385,7 +405,11 @@ def _run_bt(job: Job, source: str):
             t = ev.get("total_bytes") or 0
             dn = ev.get("downloaded_bytes", 0)
             sub = (dn / t) if t else 0
-            _set(job, progress=min(99.5, sub * 100.0), phase="downloading")
+            kw = {"progress": min(99.5, sub * 100.0), "phase": "downloading"}
+            fn = ev.get("filename")
+            if fn:
+                kw["title"] = fn
+            _set(job, **kw)
         elif ev.get("status") == "finished":
             _set(job, progress=99.5, phase="finishing")
 

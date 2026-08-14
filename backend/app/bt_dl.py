@@ -159,6 +159,7 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
                     "status": "downloading",
                     "downloaded_bytes": done,
                     "total_bytes": int(s.total_wanted) or total,
+                    "filename": torrent_name,
                 })
                 prev_done = done
             ses.wait_for_alert(_POLL_MS)

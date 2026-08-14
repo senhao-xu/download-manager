@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLang } from './i18n'
-import { getHistory } from './api'
+import { getHistory, deleteHistory } from './api'
 import type { HistoryEntry, OwnerTab } from './types'
-import { triggerDownload, mimeFromUrl, isPreviewable } from './JobView'
-import { PreviewModal } from './PreviewModal'
+import { triggerDownload } from './JobView'
 
 const PAGE_SIZE = 10
 
@@ -37,11 +36,14 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [error, setError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<{ src: string; mime: string | null } | null>(null)
+  // id of the row whose delete confirm is open; null = none.
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [deleteFiles, setDeleteFiles] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   // Re-fetch when the page, kind, or the parent's refreshKey changes. Resetting
   // to page 1 on refreshKey keeps the user on a stable view after a new entry.
-  useEffect(() => {
+  function fetchPage() {
     let cancelled = false
     setError(null)
     getHistory(kind, page, PAGE_SIZE)
@@ -56,11 +58,35 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t('fetchFailed')) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, page, refreshKey, t])
+  }
+
+  useEffect(fetchPage, [kind, page, refreshKey, t])
 
   function kindLabel(k: string): string {
     return k === 'http' ? t('kindHttp') : k === 'bt' ? t('kindBt') : t('kindYoutube')
+  }
+
+  async function confirmDelete(id: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteHistory(id, deleteFiles)
+      setDeleting(null)
+      setDeleteFiles(false)
+      // Force a refresh of the current view.
+      const lastPage = Math.max(1, Math.ceil(Math.max(0, total - 1) / PAGE_SIZE))
+      if (page > lastPage) setPage(lastPage)
+      else fetchPage()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('deleteFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function cancelDelete() {
+    setDeleting(null)
+    setDeleteFiles(false)
   }
 
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -80,9 +106,6 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
           <ul className="history-list">
             {items.map((it) => {
               const src = `/api/files/${it.id}`
-              const backendMime = it.mime && it.mime !== 'application/octet-stream' ? it.mime : null
-              const mime = backendMime || mimeFromUrl(it.filename || src)
-              const playable = it.available && !!mime && isPreviewable(it.filename || src)
               return (
                 <li key={it.id} className={`history-row${it.available ? '' : ' expired'}`}>
                   <div className="history-main">
@@ -96,20 +119,42 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
                       {it.size != null && <span className="history-size">{fmtSize(it.size)}</span>}
                       {it.source && <span className="history-source" title={it.source}>{it.source}</span>}
                     </div>
+                    {deleting === it.id && (
+                      <div className="history-delete-confirm">
+                        <label className="zip-check">
+                          <input
+                            type="checkbox"
+                            checked={deleteFiles}
+                            onChange={(e) => setDeleteFiles(e.target.checked)}
+                            disabled={busy}
+                          />
+                          {t('deleteFilesToo')}
+                        </label>
+                        <button className="danger" onClick={() => confirmDelete(it.id)} disabled={busy}>
+                          {busy ? t('deleting') : t('confirmDelete')}
+                        </button>
+                        <button className="link" onClick={cancelDelete} disabled={busy}>
+                          {t('cancel')}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="history-actions">
-                    <button
-                      onClick={() => setPreview({ src, mime })}
-                      disabled={!playable}
-                    >
-                      ▶ {t('preview')}
-                    </button>
                     <button
                       onClick={() => triggerDownload(src)}
                       disabled={!it.available}
                     >
                       ⬇ {t('reDownload')}
                     </button>
+                    {deleting !== it.id && (
+                      <button
+                        className="danger"
+                        onClick={() => { setDeleting(it.id); setDeleteFiles(false) }}
+                        disabled={busy}
+                      >
+                        ✕ {t('delete')}
+                      </button>
+                    )}
                   </div>
                 </li>
               )
@@ -119,23 +164,15 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
           {lastPage > 1 && (
             <div className="history-pager">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                ← {t('prevPage')}
+                {'←'} {t('prevPage')}
               </button>
               <span className="pager-info">{t('page', { n: page, total: lastPage })}</span>
               <button onClick={() => setPage((p) => Math.min(lastPage, p + 1))} disabled={page >= lastPage}>
-                {t('nextPage')} →
+                {t('nextPage')} {'→'}
               </button>
             </div>
           )}
         </>
-      )}
-
-      {preview && (
-        <PreviewModal
-          src={preview.src}
-          mime={preview.mime}
-          onClose={() => setPreview(null)}
-        />
       )}
     </div>
   )

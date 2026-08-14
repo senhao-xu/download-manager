@@ -153,6 +153,7 @@ def download_sync(url: str, dest_dir: Path, progress_hook) -> tuple[str, Path, i
                     "status": "downloading",
                     "downloaded_bytes": done,
                     "total_bytes": total or 0,
+                    "filename": name,
                 })
     except Exception:
         # Don't leave a partial file behind on failure.

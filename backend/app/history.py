@@ -62,6 +62,27 @@ def list_all() -> list[dict]:
     return out
 
 
+def delete_by_id(job_id: str) -> dict | None:
+    """Remove all records with the given `id`, returning the first deleted record.
+
+    JSONL is append-only, so this rewrites the whole file minus the removed
+    lines. Returns the removed record (with its `path`) so the caller can also
+    delete the on-disk file if requested; None if no record matched.
+    """
+    recs = list_all()
+    kept = [r for r in recs if r.get("id") != job_id]
+    removed = next((r for r in recs if r.get("id") == job_id), None)
+    if removed is None:
+        return None
+    # list_all returns newest-first; write oldest-first (append order) back.
+    with _lock:
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        with _path().open("w", encoding="utf-8") as f:
+            for r in reversed(kept):
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    return removed
+
+
 def list_page(kind: str | None = None, page: int = 1, page_size: int = 10):
     """Return a (page_records, total) slice of the newest-first records.
 

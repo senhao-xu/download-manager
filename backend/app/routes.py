@@ -1,6 +1,8 @@
 """HTTP API routes."""
 import asyncio
 import json
+import logging
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
@@ -28,6 +30,8 @@ from .storage import media_type, job_dir
 from yt_dlp.utils import DownloadError
 
 router = APIRouter(prefix="/api")
+
+logger = logging.getLogger("routes")
 
 _ZIP_MEDIA = {"application/zip", "video/mp4", "video/webm", "audio/mpeg"}
 
@@ -199,6 +203,35 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
             available=available,
         ))
     return HistoryList(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.delete("/history/{job_id}")
+def delete_history(job_id: str, delete_files: bool = False):
+    """Delete the history record(s) for `job_id`.
+
+    Optionally also removes the downloaded file(s) on disk. Files live under the
+    job's directory (``<DOWNLOAD_DIR>/<job_id>``); because a batch/playlist job
+    writes multiple history records sharing one id, the whole job dir is removed
+    when ``delete_files`` is set (the records are removed regardless).
+    """
+    removed = history.delete_by_id(job_id)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="No history record for that id.")
+
+    deleted_files = False
+    if delete_files:
+        d = Path(removed.get("path") or "")
+        # Resolve to the job directory: the recorded path may be a single file
+        # inside it, or the job dir itself. Walk up to the DOWNLOAD_DIR/<id> root.
+        from . import storage
+        job_root = storage.job_dir(job_id)
+        try:
+            if job_root.exists():
+                shutil.rmtree(job_root, ignore_errors=True)
+                deleted_files = True
+        except Exception as e:  # never fail the API call over file cleanup
+            logger.warning("failed to remove job dir %s: %s", job_root, e)
+    return {"ok": True, "deleted_files": deleted_files}
 
 
 # ---- Settings (cookies + proxy + JS runtime), user-editable via UI ----

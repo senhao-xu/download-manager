@@ -111,3 +111,17 @@ export async function getHistory(kind?: string, page: number = 1, pageSize: numb
   if (!r.ok) throw new Error('Failed to load history')
   return r.json()
 }
+
+export async function deleteHistory(jobId: string, deleteFiles: boolean = false): Promise<void> {
+  const params = new URLSearchParams()
+  if (deleteFiles) params.set('delete_files', 'true')
+  const r = await fetch(`/api/history/${jobId}?${params.toString()}`, { method: 'DELETE' })
+  if (!r.ok) {
+    try {
+      const j = await r.json()
+      throw new Error(j.detail || `Request failed (${r.status})`)
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(`Request failed (${r.status})`)
+    }
+  }
+}
