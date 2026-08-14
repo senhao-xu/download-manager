@@ -108,6 +108,7 @@ const translations: Record<Lang, Record<string, string>> = {
     noBtSource: 'Paste a magnet link or choose a .torrent file.',
     btHint: 'Downloads via BitTorrent (magnet or .torrent). The torrent is stopped once complete (no seeding).',
     kindBt: 'BT',
+    githubLink: 'GitHub',
   },
   zh: {
     appTitle: '下载管理器',
@@ -207,6 +208,7 @@ const translations: Record<Lang, Record<string, string>> = {
     noBtSource: '请粘贴磁力链接或选择 .torrent 文件。',
     btHint: '通过 BitTorrent 下载（磁力或 .torrent）。下载完成后即停止，不做种。',
     kindBt: 'BT',
+    githubLink: 'GitHub',
   },
 }
 

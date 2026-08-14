@@ -159,7 +159,10 @@ body::before {
   z-index: 1;
   max-width: 800px;
   margin: 0 auto;
-  padding: 40px 22px 96px;
+  padding: 40px 22px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .header { margin-bottom: 30px; }
@@ -273,8 +276,11 @@ body::before {
   vertical-align: 1px;
 }
 
-/* Fade-in for tab content switches */
-main { animation: fadeUp 0.28s var(--t-med); }
+/* Fade-in for tab content switches; flex-grow pushes the footer to the bottom */
+main {
+  flex: 1;
+  animation: fadeUp 0.28s var(--t-med);
+}
 
 /* ---------- Forms ---------- */
 .url-form {
@@ -996,9 +1002,28 @@ input[type="checkbox"] {
   }
 }
 
+/* ---------- Footer ---------- */
+.footer {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: center;
+}
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.footer-link:hover { color: var(--fg); }
+.footer-link svg { opacity: 0.85; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 640px) {
-  .app { padding: 26px 14px 80px; }
+  .app { padding: 26px 14px; }
   .header h1 { font-size: 21px; }
   .subtitle { padding-left: 0; }
   .tabs { width: 100%; }
