@@ -6,6 +6,37 @@ import { triggerDownload } from './JobView'
 
 const PAGE_SIZE = 10
 
+const DownloadIcon = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 4v10" />
+    <path d="m7 11 5 5 5-5" />
+    <path d="M5 20h14" />
+  </svg>
+)
+
+const TrashIcon = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+)
+
+const ArrowLeft = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M19 12H5" />
+    <path d="m12 19-7-7 7-7" />
+  </svg>
+)
+
+const ArrowRight = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M5 12h14" />
+    <path d="m12 5 7 7-7 7" />
+  </svg>
+)
+
 function fmtSize(bytes: number | null): string {
   if (bytes == null) return ''
   if (bytes < 1024) return `${bytes} B`
@@ -144,7 +175,7 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
                       onClick={() => triggerDownload(src)}
                       disabled={!it.available}
                     >
-                      ⬇ {t('reDownload')}
+                      {DownloadIcon} {t('reDownload')}
                     </button>
                     {deleting !== it.id && (
                       <button
@@ -152,7 +183,7 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
                         onClick={() => { setDeleting(it.id); setDeleteFiles(false) }}
                         disabled={busy}
                       >
-                        ✕ {t('delete')}
+                        {TrashIcon} {t('delete')}
                       </button>
                     )}
                   </div>
@@ -164,11 +195,11 @@ export function HistoryList({ kind, refreshKey }: { kind: OwnerTab; refreshKey: 
           {lastPage > 1 && (
             <div className="history-pager">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                {'←'} {t('prevPage')}
+                {ArrowLeft} {t('prevPage')}
               </button>
               <span className="pager-info">{t('page', { n: page, total: lastPage })}</span>
               <button onClick={() => setPage((p) => Math.min(lastPage, p + 1))} disabled={page >= lastPage}>
-                {t('nextPage')} {'→'}
+                {t('nextPage')} {ArrowRight}
               </button>
             </div>
           )}
