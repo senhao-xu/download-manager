@@ -38,6 +38,14 @@ export function JobView({ job }: { job: JobStatus }) {
   const isBatch = job.total != null && job.total > 1
   const urls = job.download_urls?.length ? job.download_urls : (job.download_url ? [job.download_url] : [])
 
+  const DownloadIcon = (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 4v10" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
+    </svg>
+  )
+
   return (
     <div className={`card job ${job.status}`}>
       <div className="job-head">
@@ -55,8 +63,8 @@ export function JobView({ job }: { job: JobStatus }) {
       {job.status === 'done' && urls.length > 0 && (
         <div className="job-actions">
           {urls.length > 1
-            ? <button className="primary download-link" onClick={() => downloadAll(urls)}>{t('downloadAll', { n: urls.length })}</button>
-            : <a className="primary download-link" href={urls[0]}>{t('downloadFile')}</a>}
+            ? <button className="primary download-link" onClick={() => downloadAll(urls)}>{DownloadIcon}{t('downloadAll', { n: urls.length })}</button>
+            : <a className="primary download-link" href={urls[0]}>{DownloadIcon}{t('downloadFile')}</a>}
         </div>
       )}
     </div>
