@@ -22,6 +22,7 @@ from pathlib import Path
 import libtorrent as lt
 
 from .config import settings as cfg
+from .errors import JobCancelled
 
 logger = logging.getLogger("bt_dl")
 
@@ -64,14 +65,18 @@ def _add_torrent(ses: lt.session, source: str, dest_dir: Path) -> lt.torrent_han
     return ses.add_torrent(params)
 
 
-def _wait_for_metadata(ses: lt.session, handle: lt.torrent_handle) -> None:
+def _wait_for_metadata(ses: lt.session, handle: lt.torrent_handle, cancel_event=None) -> None:
     """Block until the torrent's metadata is available (magnet links only).
 
-    Raises ``RuntimeError`` if metadata does not arrive within ``bt_no_data_timeout``
-    (a dead swarm never delivers the .torrent metadata).
+    Raises ``JobCancelled`` if ``cancel_event`` is set, or ``RuntimeError`` if
+    metadata does not arrive within ``bt_no_data_timeout`` (a dead swarm never
+    delivers the .torrent metadata). Pause is intentionally NOT honored here - the
+    torrent has not started downloading yet.
     """
     deadline = time.monotonic() + cfg.bt_no_data_timeout
     while not handle.status().has_metadata:
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelled()
         if time.monotonic() > deadline:
             raise RuntimeError(
                 "Timed out fetching torrent metadata. The magnet link may be "
@@ -112,7 +117,7 @@ def _scan_media(root: Path) -> list[Path]:
     return [p for p in root.rglob("*") if p.is_file()]
 
 
-def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path, int, str]:
+def download_sync(source: str, dest_dir: Path, progress_hook, cancel_event=None, pause_event=None) -> tuple[str, Path, int, str]:
     """Download one torrent (magnet link or .torrent file path) into ``dest_dir``.
 
     Returns ``(name, path, size, mime)``:
@@ -123,9 +128,14 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
 
     ``progress_hook`` receives yt-dlp-shaped dicts
     (``{"status", "downloaded_bytes", "total_bytes"}``) so the existing
-    ``jobs.py`` hook logic works unchanged. Raises ``RuntimeError`` (mapped to a
-    friendly message by the caller via ``_friendly_error``) on invalid magnet /
-    unreadable torrent / metadata timeout.
+    ``jobs.py`` hook logic works unchanged. Raises ``JobCancelled`` if
+    ``cancel_event`` is set, or ``RuntimeError`` (mapped to a friendly message by
+    the caller via ``_friendly_error``) on invalid magnet / unreadable torrent /
+    metadata timeout.
+
+    ``pause_event`` (BT only) pauses the torrent: the loop calls ``handle.pause()``
+    and blocks until cleared, then ``handle.resume()`` and resets the stall timer.
+    All libtorrent calls stay on this worker thread (the loop owns the session).
     """
     ses = lt.session({"listen_interfaces": _listen_interfaces()})
     try:
@@ -137,7 +147,7 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
 
     try:
         if _is_magnet(source):
-            _wait_for_metadata(ses, handle)
+            _wait_for_metadata(ses, handle, cancel_event=cancel_event)
 
         status = handle.status()
         info = status.torrent_file if hasattr(status, "torrent_file") else handle.get_torrent_info()
@@ -157,7 +167,34 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
         first_data_deadline = time.monotonic() + cfg.bt_no_data_timeout
         stall_deadline = first_data_deadline
         saw_data = False
+        # Whether the torrent is currently paused (BT-only pause/resume). The
+        # first iteration after pause_event is set calls handle.pause() and emits
+        # "paused"; the first iteration after it clears calls handle.resume() and
+        # emits "resumed", resetting the stall timers so the pause is never
+        # mistaken for a dead swarm.
+        did_pause = False
         while not handle.status().is_finished:
+            # Honor pause (BT only): pause the torrent, block until cleared or
+            # cancelled, then resume. While paused this `continue`s before the
+            # deadline checks below, so the stall/first-data timers never fire.
+            if pause_event is not None and pause_event.is_set():
+                if not did_pause:
+                    handle.pause()
+                    progress_hook({"status": "paused"})
+                    did_pause = True
+                if cancel_event is not None and cancel_event.is_set():
+                    raise JobCancelled()
+                ses.wait_for_alert(_POLL_MS)  # 500ms sleep, no busy-spin
+                continue
+            if did_pause:
+                handle.resume()
+                progress_hook({"status": "resumed"})
+                did_pause = False
+                # A long pause must not be mistaken for a stall / no-first-data.
+                stall_deadline = time.monotonic() + cfg.bt_stall_timeout
+                if not saw_data:
+                    first_data_deadline = stall_deadline
+
             s = handle.status()
             done = int(s.total_wanted_done)
             if done != prev_done:

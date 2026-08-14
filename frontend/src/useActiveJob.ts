@@ -99,7 +99,7 @@ export function useJobs() {
     getJob(jobId)
       .then((j) => {
         if (genOf(jobId) !== gen) return
-        if (j.status === 'done' || j.status === 'error') {
+        if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
           applyJob(j)
           return
         }
@@ -133,7 +133,7 @@ export function useJobs() {
       if (genOf(jobId) !== g) return
       const j = JSON.parse(ev.data) as JobStatus
       applyJob(j)
-      if (j.status === 'done' || j.status === 'error') {
+      if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
         es.close()
         if (!terminalRef.current.has(j.id)) {
           terminalRef.current.add(j.id)
@@ -204,8 +204,9 @@ export function useJobs() {
   function jobsFor(kind: OwnerTab): JobStatus[] {
     const all = [...jobs.values()].filter((j) => j.kind === kind)
     return all.sort((a, b) => {
-      const ta = a.status === 'queued' || a.status === 'running' ? 0 : 1
-      const tb = b.status === 'queued' || b.status === 'running' ? 0 : 1
+      const active = (s: JobStatus) => (s.status === 'queued' || s.status === 'running' || s.status === 'paused') ? 0 : 1
+      const ta = active(a)
+      const tb = active(b)
       if (ta !== tb) return ta - tb
       return 0 // preserve insertion (recency) order within the same group
     })

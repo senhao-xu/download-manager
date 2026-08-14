@@ -591,6 +591,8 @@ input[type="checkbox"] {
 }
 .job.done { border-left-color: var(--ok); }
 .job.error { border-left-color: var(--err); }
+.job.paused { border-left-color: var(--warn); }
+.job.cancelled { border-left-color: var(--muted); }
 
 .job-head {
   display: flex;
@@ -642,6 +644,12 @@ input[type="checkbox"] {
 .job.done .progress-fill::after,
 .job.error .progress-fill::after { display: none; }
 .job.error .progress-fill { background: var(--err); }
+/* Paused: freeze the sheen animation so the bar reads as stopped, not stalling. */
+.job.paused .progress-fill::after { animation-play-state: paused; }
+.job.paused .progress-fill { background: linear-gradient(90deg, var(--warn), var(--accent-2)); }
+/* Cancelled: dim the partial bar to grey and drop the sheen. */
+.job.cancelled .progress-fill { background: var(--muted); }
+.job.cancelled .progress-fill::after { display: none; }
 
 .job-status-row {
   display: flex;

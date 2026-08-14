@@ -139,6 +139,46 @@ def get_job_status(job_id: str):
     return jobs.snapshot(job)
 
 
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Signal a running job to cancel. Idempotent on terminal/missing jobs.
+
+    Works for every kind (youtube/http/bt): the worker observes ``cancel_event``
+    at its check points and transitions to the terminal ``cancelled`` status.
+    """
+    job = jobs.request_cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {"ok": True}
+
+
+def _pause_resume_response(result: tuple) -> dict:
+    """Map the (job, code) tuple from request_pause/resume to an HTTP response.
+
+    Raises HTTPException for the error codes; returns ``{"ok": True}`` on success.
+    """
+    _job, code = result
+    if code == "not_found":
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if code == "wrong_kind":
+        raise HTTPException(status_code=409, detail="Only BitTorrent jobs can be paused.")
+    if code == "no_op":
+        raise HTTPException(status_code=409, detail="Job is not in a pauseable state.")
+    return {"ok": True}
+
+
+@router.post("/jobs/{job_id}/pause")
+def pause_job(job_id: str):
+    """Pause a BT download (BT-only; non-BT jobs return 409 wrong_kind)."""
+    return _pause_resume_response(jobs.request_pause(job_id))
+
+
+@router.post("/jobs/{job_id}/resume")
+def resume_job(job_id: str):
+    """Resume a paused BT download."""
+    return _pause_resume_response(jobs.request_resume(job_id))
+
+
 @router.get("/jobs/{job_id}/events")
 async def job_events(job_id: str):
     job = jobs.get_job(job_id)
@@ -153,7 +193,7 @@ async def job_events(job_id: str):
                 break
             snap = jobs.snapshot(j)
             yield _sse(snap.model_dump())
-            if j.status in ("done", "error"):
+            if j.status in ("done", "error", "cancelled"):
                 break
             await asyncio.sleep(0.4)
 

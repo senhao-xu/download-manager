@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 from curl_cffi import requests as cffi_requests
 
 from .config import settings as cfg
+from .errors import JobCancelled
 from .settings import effective_opts
 
 logger = logging.getLogger("http_dl")
@@ -109,12 +110,13 @@ def _unique(dest_dir: Path, name: str) -> str:
         i += 1
 
 
-def download_sync(url: str, dest_dir: Path, progress_hook) -> tuple[str, Path, int, str]:
+def download_sync(url: str, dest_dir: Path, progress_hook, cancel_event=None) -> tuple[str, Path, int, str]:
     """Stream-download one URL into ``dest_dir``.
 
     Returns ``(filename, path, size, mime)``. Raises ``RuntimeError`` on an HTTP
     error status (>=400) or a connection failure, mapped to a friendly message by
-    the caller via ``_friendly_error``.
+    the caller via ``_friendly_error``. Raises ``JobCancelled`` if ``cancel_event``
+    is set mid-stream (the existing except block unlinks the partial file).
 
     ``progress_hook`` receives dicts shaped like yt-dlp's hooks
     (``{"status", "downloaded_bytes", "total_bytes"}``) so the existing
@@ -149,6 +151,8 @@ def download_sync(url: str, dest_dir: Path, progress_hook) -> tuple[str, Path, i
     try:
         with path.open("wb") as f:
             for chunk in resp.iter_content(_CHUNK):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise JobCancelled()
                 if not chunk:
                     continue
                 f.write(chunk)
