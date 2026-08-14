@@ -17,7 +17,7 @@ from pathlib import Path
 from yt_dlp.utils import DownloadError
 
 from .config import settings
-from . import downloader, history, http_dl, storage
+from . import downloader, history, http_dl, bt_dl, storage
 from .schemas import JobStatus
 from .storage import media_type
 
@@ -45,6 +45,9 @@ class Job:
 _jobs: dict[str, Job] = {}
 _lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=settings.max_concurrent, thread_name_prefix="ytdl-worker")
+# Dedicated BT pool: long torrents must not occupy yt-dlp/HTTP slots. Defaults to
+# 1 (bandwidth-bound; self-hosted). Override with BT_MAX_CONCURRENT.
+_bt_executor = ThreadPoolExecutor(max_workers=settings.bt_max_concurrent, thread_name_prefix="bt-worker")
 
 
 def create_job() -> Job:
@@ -57,6 +60,18 @@ def create_job() -> Job:
 def get_job(job_id: str) -> Job | None:
     with _lock:
         return _jobs.get(job_id)
+
+
+def is_running(job_id: str) -> bool:
+    """True if a job with this id exists and is still running.
+
+    Used by the TTL cleanup sweep to skip dirs whose download is in flight (e.g.
+    a slow BitTorrent job that exceeds TTL_MINUTES). job_id is the directory name
+    under DOWNLOAD_DIR, which matches the Job id.
+    """
+    with _lock:
+        j = _jobs.get(job_id)
+        return bool(j and j.status in ("queued", "running"))
 
 
 def snapshot(job: Job) -> JobStatus:
@@ -96,6 +111,15 @@ def _friendly_error(e: Exception) -> str:
         return "That URL is not supported or is not a valid video/playlist link."
     if "http error 403" in low or "forbidden" in low:
         return "The source returned 403 Forbidden (may block non-browser clients). Try a different video or configure cookies/proxy."
+    # ---- BitTorrent / libtorrent ----
+    if "missing info-hash" in low or "invalid info-hash" in low:
+        return "That magnet link has a missing or invalid info-hash. Check the link and try again."
+    if "timed out fetching torrent metadata" in low:
+        return "Timed out fetching torrent metadata. The magnet link may be dead (no peers) or the swarm is unreachable."
+    if "invalid or corrupt" in low and "torrent" in low:
+        return "That .torrent file is invalid or corrupt."
+    if "could not be read" in low and "torrent" in low:
+        return "That .torrent file could not be read. Please re-download it and try again."
     # yt-dlp errors are often multi-line; the real cause is usually the last
     # non-empty line. Strip the leading "ERROR:" noise.
     lines = [ln.strip() for ln in msg.splitlines() if ln.strip()]
@@ -135,6 +159,28 @@ def start_http(urls: list[str]) -> Job:
     job = create_job()
     job.total = len(urls)
     _executor.submit(_run_http, job, urls)
+    return job
+
+
+def start_bt(source: str) -> Job:
+    """Start a BitTorrent download job for a magnet link or .torrent file path.
+
+    Runs on the dedicated BT executor so it does not occupy a yt-dlp/HTTP slot.
+    """
+    job = create_job()
+    job.total = 1
+    _bt_executor.submit(_run_bt, job, source)
+    return job
+
+
+def start_bt_with_job(job: Job, source: str) -> Job:
+    """Submit an already-created BT job (used by the .torrent upload route, which
+    creates the job first to obtain a temp dir for the uploaded file).
+
+    Sets the total and submits _run_bt on the dedicated BT executor.
+    """
+    job.total = 1
+    _bt_executor.submit(_run_bt, job, source)
     return job
 
 
@@ -319,4 +365,71 @@ def _run_http(job: Job, urls: list[str]):
         )
     except Exception as e:
         logger.exception("http download failed for job %s", job.id)
+        _set(job, status="error", error=_friendly_error(e), phase="error")
+
+
+def _run_bt(job: Job, source: str):
+    """BitTorrent worker. Mirrors _run_http: download_sync emits the same hook
+    dict shape, so the hook closure is reused. The torrent is stopped (no seeding)
+    the instant it finishes; files are kept on disk for serving.
+
+    Single-file torrent -> direct download_url (mirrors _run_single / _run_http
+    single-URL path). Multi-file -> indexed /api/files/<id>/<i> list via
+    snapshot() (mirrors _run_http batch path). History kind="bt".
+    """
+    _set(job, status="running", phase="connecting to swarm", total=1, current=0)
+    d = storage.job_dir(job.id)
+
+    def hook(ev):
+        if ev.get("status") == "downloading":
+            t = ev.get("total_bytes") or 0
+            dn = ev.get("downloaded_bytes", 0)
+            sub = (dn / t) if t else 0
+            _set(job, progress=min(99.5, sub * 100.0), phase="downloading")
+        elif ev.get("status") == "finished":
+            _set(job, progress=99.5, phase="finishing")
+
+    try:
+        name, path, size, mime = bt_dl.download_sync(source, d, hook)
+
+        if path.is_file():
+            # Single-file torrent: serve directly.
+            _set(
+                job,
+                status="done",
+                progress=100.0,
+                phase="done",
+                title=name,
+                result_path=str(path),
+                result_filename=name,
+                files=[(str(path), name)],
+                download_url=f"/api/files/{job.id}",
+            )
+            _record_history(job, "bt", source, str(path), name, mime)
+        else:
+            # Multi-file torrent: scan the folder into an indexed file list.
+            saved: list = []
+            for fp in sorted(p for p in path.rglob("*") if p.is_file()):
+                saved.append((str(fp), fp.name))
+            if not saved:
+                # libtorrent reported multi-file but produced nothing scannable;
+                # fall back to whatever is directly in the job dir.
+                saved = [(str(p), p.name) for p in sorted(d.iterdir()) if p.is_file()]
+            if not saved:
+                raise RuntimeError("Download finished but no output files were produced.")
+            _set(
+                job,
+                status="done",
+                progress=100.0,
+                phase="done",
+                title=name,
+                files=saved,
+                result_path=None,
+                result_filename=None,
+                download_url=None,
+            )
+            for fp_str, fname in saved:
+                _record_history(job, "bt", source, fp_str, fname, media_type(fp_str))
+    except Exception as e:
+        logger.exception("bt download failed for job %s", job.id)
         _set(job, status="error", error=_friendly_error(e), phase="error")

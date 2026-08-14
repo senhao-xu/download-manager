@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import routes, storage
+from . import jobs, routes, storage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,7 +20,9 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    storage.start_cleanup_thread()
+    # Skip TTL cleanup for dirs whose job is still running (e.g. a slow
+    # BitTorrent download that exceeds TTL_MINUTES) so in-flight files survive.
+    storage.start_cleanup_thread(is_active=jobs.is_running)
     yield
 
 

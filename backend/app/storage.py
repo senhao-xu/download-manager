@@ -43,13 +43,25 @@ def media_type(path: str) -> str:
     return "application/octet-stream"
 
 
-def cleanup_expired():
-    """Remove job dirs older than TTL_MINUTES. Safe to run on a background thread."""
+def cleanup_expired(is_active=None):
+    """Remove job dirs older than TTL_MINUTES. Safe to run on a background thread.
+
+    ``is_active`` is an optional ``Callable[[str], bool]``: when it returns True
+    for a job id (directory name), that dir is skipped even if older than TTL.
+    Used to protect running jobs (e.g. a slow BitTorrent download) from being
+    wiped mid-download. Default None preserves the old behavior for any caller.
+    """
     now = time.time()
     ttl = settings.ttl_minutes * 60
     for d in settings.download_dir.iterdir():
         if not d.is_dir():
             continue
+        if is_active is not None:
+            try:
+                if is_active(d.name):
+                    continue
+            except Exception:  # never let an active-check abort the whole sweep
+                logger.debug("is_active check raised for %s; treating as inactive", d, exc_info=True)
         try:
             age = now - d.stat().st_mtime
         except OSError:
@@ -59,14 +71,14 @@ def cleanup_expired():
             logger.info("cleaned up expired job dir %s", d)
 
 
-def start_cleanup_thread():
+def start_cleanup_thread(is_active=None):
     interval = max(60, settings.ttl_minutes * 60 // 2)
 
     def loop():
         while True:
             time.sleep(interval)
             try:
-                cleanup_expired()
+                cleanup_expired(is_active)
             except Exception:  # never let the sweep thread die
                 logger.exception("cleanup sweep failed")
 

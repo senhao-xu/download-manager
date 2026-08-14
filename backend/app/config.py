@@ -24,6 +24,11 @@ class Settings:
     impersonate: str | None = os.getenv("YTDLP_IMPERSONATE") or None
     sleep_interval: float = float(os.getenv("YTDLP_SLEEP_INTERVAL", "0") or 0)
 
+    # BitTorrent: a dedicated worker pool (separate from yt-dlp/HTTP) so long
+    # torrents don't block video downloads. BT listens on TCP+UDP for peers/DHT.
+    bt_max_concurrent: int = int(os.getenv("BT_MAX_CONCURRENT", "1"))
+    bt_listen_port: int = int(os.getenv("BT_LISTEN_PORT", "6881"))
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

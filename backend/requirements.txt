@@ -8,3 +8,8 @@ uvicorn[standard]>=0.32
 pydantic>=2.9
 aiofiles>=24.1
 curl_cffi>=0.7
+# Form-data parsing for the .torrent upload endpoint (POST /api/download-bt/file).
+python-multipart>=0.0.9
+# BitTorrent engine (magnet + .torrent). Ships as a manylinux wheel - no system
+# build deps or apt packages needed. python-libtorrent on PyPI.
+libtorrent>=2.0.9

@@ -44,6 +44,23 @@ if "sign in to confirm" in low or "not a bot" in low:
 
 Routes reuse the same helper via `_friendly(e)`.
 
+### BitTorrent / libtorrent errors -> friendly messages
+
+`bt_dl.download_sync` raises `RuntimeError` with a short cause; `jobs._friendly_error`
+pattern-matches the libtorrent-specific failures (same helper, extended for BT):
+
+```python
+if "missing info-hash" in low or "invalid info-hash" in low:
+    return "That magnet link has a missing or invalid info-hash. ..."
+if "timed out fetching torrent metadata" in low:
+    return "Timed out fetching torrent metadata. The magnet link may be dead ..."
+```
+
+BT failure modes worth a friendly mapping: invalid/corrupt `.torrent`, unreadable
+`.torrent`, magnet metadata timeout (dead swarm), missing/invalid info-hash. Raw
+libtorrent messages (e.g. `"missing info-hash from URI [libtorrent:22]"`) are not
+user-actionable - always add a pattern rather than letting them fall through.
+
 ### Background workers (jobs)
 
 Workers run in a threadpool and **must not raise** - they catch every exception

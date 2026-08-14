@@ -50,6 +50,10 @@ class HttpDownloadRequest(BaseModel):
     urls: list[str]
 
 
+class BtMagnetRequest(BaseModel):
+    magnet: str
+
+
 class JobCreated(BaseModel):
     job_id: str
 

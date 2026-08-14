@@ -44,6 +44,22 @@ export async function startHttpDownload(urls: string[]): Promise<string> {
   return j.job_id as string
 }
 
+export async function startBtMagnet(magnet: string): Promise<string> {
+  const r = await postJSON('/api/download-bt', { magnet })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
+export async function startBtTorrentFile(file: File): Promise<string> {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await fetch('/api/download-bt/file', { method: 'POST', body: form })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
 // ---- Settings ----
 
 export async function getSettings(): Promise<SettingsState> {

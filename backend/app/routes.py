@@ -3,13 +3,14 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 
 from . import downloader, history, jobs
 from . import settings as app_settings
 from .schemas import (
     BatchRequest,
+    BtMagnetRequest,
     CookieCheckResult,
     DownloadRequest,
     HistoryEntry,
@@ -23,7 +24,7 @@ from .schemas import (
     TestRequest,
     TestResult,
 )
-from .storage import media_type
+from .storage import media_type, job_dir
 from yt_dlp.utils import DownloadError
 
 router = APIRouter(prefix="/api")
@@ -73,6 +74,46 @@ def post_download_http(req: HttpDownloadRequest):
             detail=f"Invalid URL(s) (must start with http:// or https://): {bad[:3]}",
         )
     job = jobs.start_http(cleaned)
+    return JobCreated(job_id=job.id)
+
+
+@router.post("/download-bt", response_model=JobCreated)
+def post_download_bt(req: BtMagnetRequest):
+    """Start a BitTorrent download from a magnet link."""
+    magnet = req.magnet.strip()
+    low = magnet.lower()
+    if not low.startswith("magnet:?") or "xt=urn:btih:" not in low:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid magnet link. It must start with 'magnet:?' and contain 'xt=urn:btih:'.",
+        )
+    job = jobs.start_bt(magnet)
+    return JobCreated(job_id=job.id)
+
+
+@router.post("/download-bt/file", response_model=JobCreated)
+async def post_download_bt_file(file: UploadFile = File(...)):
+    """Start a BitTorrent download from an uploaded .torrent file.
+
+    Writes the uploaded bytes to the job's temp dir, then starts the job with
+    that file path as the source. The .torrent is small, so a synchronous write
+    here is fine.
+    """
+    # Create the job first so we have a temp dir to write the .torrent into.
+    job = jobs.create_job()
+    dest = job_dir(job.id)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix and suffix != ".torrent":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a .torrent file, got '{suffix or 'no extension'}'.",
+        )
+    torrent_path = dest / "source.torrent"
+    torrent_path.write_bytes(raw)
+    jobs.start_bt_with_job(job, str(torrent_path))
     return JobCreated(job_id=job.id)
 
 

@@ -92,6 +92,14 @@ const translations: Record<Lang, Record<string, string>> = {
     kindYoutube: 'YouTube',
     kindHttp: 'HTTP',
     noHistory: 'No downloads yet.',
+    tabBT: 'BT',
+    btTabTitle: 'BitTorrent Download',
+    btPlaceholder: 'Paste a magnet link\u2026\nmagnet:?xt=urn:btih:\u2026',
+    btFileLabel: 'Or upload a .torrent file',
+    downloadBt: 'Download',
+    noBtSource: 'Paste a magnet link or choose a .torrent file.',
+    btHint: 'Downloads via BitTorrent (magnet or .torrent). The torrent is stopped once complete (no seeding).',
+    kindBt: 'BT',
   },
   zh: {
     appTitle: 'YouTube 下载器',
@@ -175,6 +183,14 @@ const translations: Record<Lang, Record<string, string>> = {
     kindYoutube: 'YouTube',
     kindHttp: 'HTTP',
     noHistory: '还没有下载记录。',
+    tabBT: 'BT',
+    btTabTitle: 'BitTorrent 下载',
+    btPlaceholder: '粘贴磁力链接\u2026\nmagnet:?xt=urn:btih:\u2026',
+    btFileLabel: '或上传 .torrent 文件',
+    downloadBt: '下载',
+    noBtSource: '请粘贴磁力链接或选择 .torrent 文件。',
+    btHint: '通过 BitTorrent 下载（磁力或 .torrent）。下载完成后即停止，不做种。',
+    kindBt: 'BT',
   },
 }
 
@@ -238,12 +254,12 @@ export function useTheme() {
   return { choice, theme: resolved, cycle }
 }
 
-export type Tab = 'youtube' | 'http'
+export type Tab = 'youtube' | 'http' | 'bt'
 
 export function useTab() {
   const [tab, setTabState] = useState<Tab>(() => {
     const stored = typeof localStorage !== 'undefined' && localStorage.getItem('tab')
-    return stored === 'http' ? 'http' : 'youtube'
+    return stored === 'http' ? 'http' : stored === 'bt' ? 'bt' : 'youtube'
   })
   const setTab = (next: Tab) => {
     localStorage.setItem('tab', next)

@@ -37,7 +37,7 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
   }, [t])
 
   function kindLabel(kind: string): string {
-    return kind === 'http' ? t('kindHttp') : t('kindYoutube')
+    return kind === 'http' ? t('kindHttp') : kind === 'bt' ? t('kindBt') : t('kindYoutube')
   }
 
   return (

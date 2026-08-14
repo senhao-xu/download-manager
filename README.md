@@ -100,6 +100,8 @@ Most YouTube-related settings are edited in the **Settings UI** (persisted to
 | `YTDLP_PROXY` | _(none)_ | Fallback HTTP/SOCKS proxy (UI overrides) |
 | `YTDLP_IMPERSONATE` | _(none)_ | Browser TLS impersonation target (e.g. `chrome`) |
 | `YTDLP_SLEEP_INTERVAL` | `0` | Delay between requests (anti-throttle) |
+| `BT_MAX_CONCURRENT` | `1` | Concurrent BitTorrent download workers (separate pool from YouTube/HTTP) |
+| `BT_LISTEN_PORT` | `6881` | TCP+UDP port for BT peers/DHT (publish it for better connectivity) |
 
 ## API
 
@@ -109,6 +111,8 @@ Most YouTube-related settings are edited in the **Settings UI** (persisted to
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}` (HTTP relay download) |
+| POST | `/api/download-bt` | `{magnet}` | `{job_id}` (BitTorrent magnet) |
+| POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}` (BitTorrent file) |
 | GET | `/api/jobs/{id}` | - | Job status snapshot |
 | GET | `/api/jobs/{id}/events` | - | SSE progress stream |
 | GET | `/api/files/{id}` | - | The downloaded file or zip |
@@ -126,9 +130,17 @@ Most YouTube-related settings are edited in the **Settings UI** (persisted to
 ## Features
 
 - **Tabs** - a **YouTube** tab (paste a video/playlist URL, pick quality,
-  download) and an **HTTP** tab (paste one or more direct HTTP(S) links; the
+  download), an **HTTP** tab (paste one or more direct HTTP(S) links; the
   server stream-downloads them through itself as a relay and serves the files,
-  with live progress). The selected tab is remembered.
+  with live progress), and a **BT** tab (paste a magnet link or upload a
+  `.torrent` file; downloads via BitTorrent with live progress). The selected
+  tab is remembered.
+- **BitTorrent** - magnet links and `.torrent` files via `libtorrent` (no
+  seeding: the torrent is stopped as soon as it reaches 100%). BT runs on its own
+  worker pool (`BT_MAX_CONCURRENT`) so it never blocks YouTube/HTTP downloads,
+  and a running BT job is exempt from the TTL cleanup. For best peer/DHT
+  connectivity, publish port `BT_LISTEN_PORT` (TCP+UDP) in your compose/run
+  config, e.g. add `-p 6881:6881/tcp -p 6881:6881/udp`.
 - **Preview** - completed video/audio downloads play in-page (and images for the
   HTTP tab) without re-downloading.
 - **History** - every completed download is recorded to `<DATA_DIR>/history.jsonl`

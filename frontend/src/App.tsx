@@ -4,6 +4,7 @@ import { HistoryPanel } from './HistoryPanel'
 import { useLang, useTheme, useTab } from './i18n'
 import { YouTubeTab } from './YouTubeTab'
 import { HttpTab } from './HttpTab'
+import { BtTab } from './BtTab'
 
 export default function App() {
   const { t, lang, setLang } = useLang()
@@ -52,10 +53,16 @@ export default function App() {
         >
           {t('tabHTTP')}
         </button>
+        <button
+          className={tab === 'bt' ? 'active' : ''}
+          onClick={() => setTab('bt')}
+        >
+          {t('tabBT')}
+        </button>
       </nav>
 
       <main>
-        {tab === 'youtube' ? <YouTubeTab /> : <HttpTab />}
+        {tab === 'youtube' ? <YouTubeTab /> : tab === 'http' ? <HttpTab /> : <BtTab />}
       </main>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
