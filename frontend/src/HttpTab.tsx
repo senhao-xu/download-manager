@@ -1,16 +1,13 @@
 import { useState } from 'react'
 import { useLang } from './i18n'
 import { JobView } from './JobView'
-import { useJobSubscription } from './useJobSubscription'
 import { startHttpDownload } from './api'
-import type { JobStatus } from './types'
+import type { ActiveJobProps, JobStatus } from './types'
 
-export function HttpTab() {
+export function HttpTab({ active, startJob, reset }: ActiveJobProps) {
   const { t } = useLang()
   const [text, setText] = useState('')
-  const [job, setJob] = useState<JobStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { subscribe, reset } = useJobSubscription(setJob)
 
   async function onStart(e: React.FormEvent) {
     e.preventDefault()
@@ -20,29 +17,29 @@ export function HttpTab() {
       return
     }
     reset()
-    setJob(null)
     setError(null)
     try {
-      const id = await startHttpDownload(urls)
-      setJob({
-        id,
-        status: 'queued',
-        progress: 0,
-        current: 0,
-        total: urls.length,
-        phase: 'queued',
-        title: null,
-        error: null,
-        download_url: null,
-        download_urls: [],
-      })
-      subscribe(id)
+      await startJob(
+        () => startHttpDownload(urls),
+        {
+          id: '',
+          status: 'queued',
+          progress: 0,
+          current: 0,
+          total: urls.length,
+          phase: 'queued',
+          title: null,
+          error: null,
+          download_url: null,
+          download_urls: [],
+        } satisfies JobStatus,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
     }
   }
 
-  const running = !!job && job.status === 'running'
+  const running = !!active && active.status === 'running'
 
   return (
     <>
@@ -61,7 +58,7 @@ export function HttpTab() {
       </form>
       <p className="hint">{t('httpHint')}</p>
       {error && <div className="error">{error}</div>}
-      {job && <JobView job={job} />}
+      {active && <JobView job={active} />}
     </>
   )
 }

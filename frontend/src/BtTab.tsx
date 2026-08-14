@@ -1,54 +1,56 @@
 import { useRef, useState } from 'react'
 import { useLang } from './i18n'
 import { JobView } from './JobView'
-import { useJobSubscription } from './useJobSubscription'
 import { startBtMagnet, startBtTorrentFile } from './api'
-import type { JobStatus } from './types'
+import type { ActiveJobProps, JobStatus } from './types'
 
-export function BtTab() {
+export function BtTab({ active, startJob, reset }: ActiveJobProps) {
   const { t } = useLang()
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
-  const [job, setJob] = useState<JobStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { subscribe, reset } = useJobSubscription(setJob)
   const fileInput = useRef<HTMLInputElement>(null)
 
   async function onStart(e: React.FormEvent) {
     e.preventDefault()
     const magnet = text.trim()
     reset()
-    setJob(null)
     setError(null)
     try {
-      let id: string
+      let starter: () => Promise<string>
+      let title: string | null
       if (magnet) {
-        id = await startBtMagnet(magnet)
+        starter = () => startBtMagnet(magnet)
+        title = null
       } else if (file) {
-        id = await startBtTorrentFile(file)
+        const f = file
+        starter = () => startBtTorrentFile(f)
+        title = f.name
       } else {
         setError(t('noBtSource'))
         return
       }
-      setJob({
-        id,
-        status: 'queued',
-        progress: 0,
-        current: 0,
-        total: 1,
-        phase: 'queued',
-        title: file ? file.name : null,
-        error: null,
-        download_url: null,
-        download_urls: [],
-      })
-      subscribe(id)
+      await startJob(
+        starter,
+        {
+          id: '',
+          status: 'queued',
+          progress: 0,
+          current: 0,
+          total: 1,
+          phase: 'queued',
+          title,
+          error: null,
+          download_url: null,
+          download_urls: [],
+        } satisfies JobStatus,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
     }
   }
 
-  const running = !!job && job.status === 'running'
+  const running = !!active && active.status === 'running'
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -91,7 +93,7 @@ export function BtTab() {
       </form>
       <p className="hint">{t('btHint')}</p>
       {error && <div className="error">{error}</div>}
-      {job && <JobView job={job} />}
+      {active && <JobView job={active} />}
     </>
   )
 }

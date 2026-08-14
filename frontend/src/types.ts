@@ -1,4 +1,15 @@
 // Mirrors backend/app/schemas.py
+export type OwnerTab = 'youtube' | 'http' | 'bt'
+
+export interface ActiveJobProps {
+  /** The active job iff it was started by this tab; otherwise null. */
+  active: JobStatus | null
+  /** Start a job: run `starter` (API call -> job_id), show `initial` immediately. */
+  startJob: (starter: () => Promise<string>, initial: JobStatus) => Promise<void>
+  /** Clear the active job and close its SSE stream. */
+  reset: () => void
+}
+
 export interface VideoFormat {
   format_id: string | null
   ext: string | null

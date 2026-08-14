@@ -5,6 +5,8 @@ import { useLang, useTheme, useTab } from './i18n'
 import { YouTubeTab } from './YouTubeTab'
 import { HttpTab } from './HttpTab'
 import { BtTab } from './BtTab'
+import { useActiveJob } from './useActiveJob'
+import type { JobStatus } from './types'
 
 export default function App() {
   const { t, lang, setLang } = useLang()
@@ -14,6 +16,16 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false)
   const themeIcon = choice === 'dark' ? '🌙' : choice === 'light' ? '☀' : '💻'
   const themeTitle = `${t('themeToggle')} (${t(choice === 'dark' ? 'themeDark' : choice === 'light' ? 'themeLight' : 'themeSystem')})`
+
+  // One active-job store at App level: the job + its SSE stream survive tab
+  // component mount/unmount, so switching tabs no longer drops an in-flight
+  // download. Each tab only renders the job it started (jobFor).
+  const active = useActiveJob()
+  const tabProps = {
+    active: active.jobFor(tab),
+    startJob: (starter: () => Promise<string>, initial: JobStatus) => active.start(tab, starter, initial),
+    reset: active.reset,
+  }
 
   return (
     <div className="app">
@@ -62,7 +74,7 @@ export default function App() {
       </nav>
 
       <main>
-        {tab === 'youtube' ? <YouTubeTab /> : tab === 'http' ? <HttpTab /> : <BtTab />}
+        {tab === 'youtube' ? <YouTubeTab {...tabProps} /> : tab === 'http' ? <HttpTab {...tabProps} /> : <BtTab {...tabProps} />}
       </main>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}

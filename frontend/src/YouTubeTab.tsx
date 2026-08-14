@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import type { InfoResponse, JobStatus } from './types'
+import type { ActiveJobProps, InfoResponse, JobStatus } from './types'
 import { fetchInfo, startDownload, startBatch } from './api'
 import { useLang } from './i18n'
 import { JobView } from './JobView'
-import { useJobSubscription } from './useJobSubscription'
 
 function fmtDuration(s: number | null): string {
   if (s == null) return ''
@@ -14,7 +13,7 @@ function fmtDuration(s: number | null): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
 }
 
-export function YouTubeTab() {
+export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
   const { t } = useLang()
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
@@ -23,13 +22,9 @@ export function YouTubeTab() {
   const [quality, setQuality] = useState('best')
   const [zip, setZip] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [job, setJob] = useState<JobStatus | null>(null)
-
-  const { subscribe, reset } = useJobSubscription(setJob)
 
   function resetJob() {
     reset()
-    setJob(null)
   }
 
   async function onGetInfo(e: React.FormEvent) {
@@ -56,9 +51,10 @@ export function YouTubeTab() {
     resetJob()
     setError(null)
     try {
-      const jobId = await startDownload(url.trim(), quality)
-      setJob({ id: jobId, status: 'queued', progress: 0, current: null, total: null, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] })
-      subscribe(jobId)
+      await startJob(
+        () => startDownload(url.trim(), quality),
+        { id: '', status: 'queued', progress: 0, current: null, total: null, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
     }
@@ -77,9 +73,10 @@ export function YouTubeTab() {
     resetJob()
     setError(null)
     try {
-      const jobId = await startBatch(urls, quality, zip)
-      setJob({ id: jobId, status: 'queued', progress: 0, current: 0, total: urls.length, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] })
-      subscribe(jobId)
+      await startJob(
+        () => startBatch(urls, quality, zip),
+        { id: '', status: 'queued', progress: 0, current: 0, total: urls.length, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
     }
@@ -139,8 +136,8 @@ export function YouTubeTab() {
             </div>
           </div>
           <div className="actions">
-            <QualityPicker disabled={!!job && job.status === 'running'} />
-            <button className="primary" onClick={onDownloadSingle} disabled={!!job && job.status === 'running'}>
+            <QualityPicker disabled={!!active && active.status === 'running'} />
+            <button className="primary" onClick={onDownloadSingle} disabled={!!active && active.status === 'running'}>
               {t('download')}
             </button>
           </div>
@@ -170,19 +167,19 @@ export function YouTubeTab() {
             ))}
           </ul>
           <div className="actions">
-            <QualityPicker disabled={!!job && job.status === 'running'} />
+            <QualityPicker disabled={!!active && active.status === 'running'} />
             <label className="zip-check">
-              <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} disabled={!!job && job.status === 'running'} />
+              <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} disabled={!!active && active.status === 'running'} />
               {t('zipLabel')}
             </label>
-            <button className="primary" onClick={onDownloadBatch} disabled={!!job && job.status === 'running'}>
+            <button className="primary" onClick={onDownloadBatch} disabled={!!active && active.status === 'running'}>
               {selected.size > 0 ? t('downloadN', { n: selected.size }) : t('download')}
             </button>
           </div>
         </div>
       )}
 
-      {job && <JobView job={job} />}
+      {active && <JobView job={active} />}
     </>
   )
 }

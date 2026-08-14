@@ -32,7 +32,35 @@ shallow.
 - No cache: re-fetching is cheap and avoids stale-data bugs.
 - Live updates (download progress) come from an `EventSource` (SSE) stored in a
   `useRef`; each message calls `setJob(...)`. The EventSource is closed on
-  unmount (`useEffect` cleanup) and on terminal status.
+  terminal status.
+
+### The active download job is lifted to App level (`useActiveJob`)
+
+The download job + its SSE `EventSource` are owned by a single `useActiveJob()`
+hook instantiated **once in `App`**, NOT by each tab. This is deliberate: tabs
+are conditionally rendered (`App.tsx`), so switching tabs unmounts the tab
+component. State/refs owned by the tab are destroyed on unmount - if the job
+lived in the tab, switching away would drop the in-flight download from the UI
+and close its SSE stream (the backend keeps running it).
+
+`useActiveJob` owns `job` (`useState`), `ownerTab` (which tab started it), and
+the `EventSource` (`useRef`). It exposes:
+
+- `jobFor(tab)` - the job only if this tab started it (so a YouTube job doesn't
+  render on the BT tab).
+- `start(owner, starter, initial)` - closes any prior stream, sets the queued
+  job, runs `starter` (the API call), patches the real `job_id`, subscribes.
+- `reset()` - clear + close.
+
+`App` passes `{ active: jobFor(tab), startJob: (s,i) => start(tab,s,i), reset }`
+to the rendered tab. Tabs accept `ActiveJobProps` and call `startJob`, never
+owning `job` themselves. One active job at a time.
+
+Auto-download (single-file done -> browser download) is guarded by an
+`autoTriggeredRef` keyed by `job_id`: it fires once on the original Start, and
+**never** on a restored `done` job (the stream was already closed, so no second
+`onmessage`). Do not re-open the stream on tab restore - the persisted `job`
+snapshot already reflects the latest status.
 
 ## Derived State
 
@@ -45,8 +73,14 @@ const isBatch = job.total != null && job.total > 1
 
 ## Common Mistakes
 
+- **Owning the download `job` in a tab component.** Tabs unmount on switch; the
+  job and its SSE stream would be destroyed. The active job MUST live in
+  `useActiveJob` at App level. Only tab-local form state (`url`, `info`,
+  `quality`, …) may stay in the tab.
 - Putting `download_url`/`download_urls` in state separately - derive from the
   single `job` object.
-- Forgetting to close the `EventSource` on unmount (leaks across navigations).
+- Forgetting to close the `EventSource` on terminal status (leaks). The App-level
+  unmount cleanup is a backstop; the real closure is on `done`/`error`.
 - Auto-triggering multiple downloads - browsers block it; use a "Download all"
-  button (user gesture) with staggered `setTimeout` instead.
+  button (user gesture) with staggered `setTimeout` instead. Single-file
+  auto-download fires at most once per job (`autoTriggeredRef`).
