@@ -155,10 +155,10 @@ def start_single(url: str, quality: str) -> Job:
     return job
 
 
-def start_batch(urls: list[str], quality: str, zip_mode: bool = False) -> Job:
+def start_batch(urls: list[str], quality: str, zip_mode: bool = False, title: str | None = None) -> Job:
     job = create_job()
     job.total = len(urls)
-    _executor.submit(_run_batch, job, urls, quality, zip_mode)
+    _executor.submit(_run_batch, job, urls, quality, zip_mode, title)
     return job
 
 
@@ -264,7 +264,7 @@ def _run_single(job: Job, url: str, quality: str):
         _set(job, status="error", error=_friendly_error(e), phase="error")
 
 
-def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
+def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: str | None = None):
     total = len(urls)
     _set(job, status="running", phase="starting", total=total, current=0)
     d = storage.job_dir(job.id)
@@ -296,7 +296,8 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
 
         if zip_mode:
             _set(job, phase="packaging zip", progress=99.5)
-            zip_path = d / "playlist.zip"
+            zip_name = _filename(_safe_base(title, "playlist"), "zip")
+            zip_path = d / zip_name
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
                 for path, name in saved:
                     z.write(path, arcname=name)
@@ -306,13 +307,13 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool):
                 progress=100.0,
                 phase="done",
                 result_path=str(zip_path),
-                result_filename="playlist.zip",
+                result_filename=zip_name,
                 files=[],
                 download_url=f"/api/files/{job.id}",
             )
             _record_history(
                 job, "youtube", urls[0] if urls else None,
-                str(zip_path), "playlist.zip", media_type(str(zip_path)),
+                str(zip_path), zip_name, media_type(str(zip_path)),
             )
         else:
             # return each file directly as mp4 (no zip)

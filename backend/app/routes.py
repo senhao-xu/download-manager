@@ -61,7 +61,7 @@ async def post_download(req: DownloadRequest):
 async def post_download_batch(req: BatchRequest):
     if not req.urls:
         raise HTTPException(status_code=400, detail="No URLs selected.")
-    job = jobs.start_batch(req.urls, req.quality, req.zip)
+    job = jobs.start_batch(req.urls, req.quality, req.zip, req.title)
     return JobCreated(job_id=job.id)
 
 

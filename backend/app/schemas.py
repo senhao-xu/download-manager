@@ -44,6 +44,8 @@ class BatchRequest(BaseModel):
     urls: list[str]
     quality: str = "best"
     zip: bool = False
+    # playlist title (from /info); used to name the zip when zip=True.
+    title: str | None = None
 
 
 class HttpDownloadRequest(BaseModel):

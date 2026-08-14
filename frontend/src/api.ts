@@ -30,8 +30,8 @@ export async function startDownload(url: string, quality: string): Promise<strin
   return j.job_id as string
 }
 
-export async function startBatch(urls: string[], quality: string, zip: boolean = false): Promise<string> {
-  const r = await postJSON('/api/download-batch', { urls, quality, zip })
+export async function startBatch(urls: string[], quality: string, zip: boolean = false, title?: string): Promise<string> {
+  const r = await postJSON('/api/download-batch', { urls, quality, zip, title })
   if (!r.ok) throw new Error(await readError(r))
   const j = await r.json()
   return j.job_id as string

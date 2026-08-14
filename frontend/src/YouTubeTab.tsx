@@ -83,7 +83,7 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
     setError(null)
     try {
       await startJob(
-        () => startBatch(urls, quality, zip),
+        () => startBatch(urls, quality, zip, info.title || undefined),
         { id: '', status: 'queued', progress: 0, current: 0, total: urls.length, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
       )
     } catch (err) {
