@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
-import type { ActiveJobProps, InfoResponse, JobStatus } from './types'
+import { useState } from 'react'
+import type { InfoResponse, JobStatus, TabJobProps } from './types'
 import { fetchInfo, startDownload, startBatch } from './api'
 import { useLang } from './i18n'
-import { JobView } from './JobView'
 import { YouTubeSettings } from './YouTubeSettings'
 import { HistoryList } from './HistoryList'
 
@@ -15,7 +14,7 @@ function fmtDuration(s: number | null): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
 }
 
-export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
+export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
   const { t } = useLang()
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
@@ -24,22 +23,10 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
   const [quality, setQuality] = useState('best')
   const [zip, setZip] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  // Bumped when the active job reaches `done` so the inline history refetches
-  // and shows the just-completed download.
-  const [historyRefresh, setHistoryRefresh] = useState(0)
-  const doneId = active?.status === 'done' ? active.id : null
-  useEffect(() => {
-    if (doneId) setHistoryRefresh((n) => n + 1)
-  }, [doneId])
-
-  function resetJob() {
-    reset()
-  }
 
   async function onGetInfo(e: React.FormEvent) {
     e.preventDefault()
     if (!url.trim()) return
-    resetJob()
     setInfo(null)
     setError(null)
     setLoading(true)
@@ -57,12 +44,11 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
 
   async function onDownloadSingle() {
     if (!info || info.is_playlist) return
-    resetJob()
     setError(null)
     try {
       await startJob(
         () => startDownload(url.trim(), quality),
-        { id: '', status: 'queued', progress: 0, current: null, total: null, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
+        { id: '', kind: 'youtube', status: 'queued', progress: 0, current: null, total: null, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
@@ -79,12 +65,11 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
       setError(t('selectAtLeastOne'))
       return
     }
-    resetJob()
     setError(null)
     try {
       await startJob(
         () => startBatch(urls, quality, zip, info.title || undefined),
-        { id: '', status: 'queued', progress: 0, current: 0, total: urls.length, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
+        { id: '', kind: 'youtube', status: 'queued', progress: 0, current: 0, total: urls.length, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : t('startFailed'))
@@ -147,8 +132,8 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
             </div>
           </div>
           <div className="actions">
-            <QualityPicker disabled={!!active && active.status === 'running'} />
-            <button className="primary" onClick={onDownloadSingle} disabled={!!active && active.status === 'running'}>
+            <QualityPicker disabled={false} />
+            <button className="primary" onClick={onDownloadSingle}>
               {t('download')}
             </button>
           </div>
@@ -178,20 +163,19 @@ export function YouTubeTab({ active, startJob, reset }: ActiveJobProps) {
             ))}
           </ul>
           <div className="actions">
-            <QualityPicker disabled={!!active && active.status === 'running'} />
+            <QualityPicker disabled={false} />
             <label className="zip-check">
-              <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} disabled={!!active && active.status === 'running'} />
+              <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} />
               {t('zipLabel')}
             </label>
-            <button className="primary" onClick={onDownloadBatch} disabled={!!active && active.status === 'running'}>
+            <button className="primary" onClick={onDownloadBatch}>
               {selected.size > 0 ? t('downloadN', { n: selected.size }) : t('download')}
             </button>
           </div>
         </div>
       )}
 
-      {active && <JobView job={active} />}
-      <HistoryList kind="youtube" refreshKey={historyRefresh} />
+      <HistoryList kind="youtube" activeJobs={activeJobs} refreshKey={refreshKey} />
     </>
   )
 }

@@ -697,6 +697,17 @@ input[type="checkbox"] {
 /* ---------- Inline per-tab history ---------- */
 .history-inline { margin-top: 28px; }
 
+/* Active (in-flight) job rows pinned above the history list. Each renders a
+   full JobView card with a live progress bar. */
+.active-jobs-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+}
+.active-job-row { margin: 0 0 12px; }
+.active-job-row .job { margin: 0; }
+.active-job-row .job.done { border-left-color: var(--ok); }
+
 .history-inline-head {
   display: flex;
   align-items: baseline;

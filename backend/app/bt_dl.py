@@ -25,11 +25,6 @@ from .config import settings as cfg
 
 logger = logging.getLogger("bt_dl")
 
-# How long to wait for a magnet link to resolve its metadata before giving up.
-# Magnet links start with only an info-hash; the swarm must be contacted to fetch
-# the .torrent metadata. On a healthy swarm this is seconds; on a dead one it
-# never resolves, so we bound it.
-_METADATA_TIMEOUT = 120  # seconds
 # Poll interval for both the metadata wait and the download loop. Keeps the
 # worker responsive to cancellation without busy-spinning.
 _POLL_MS = 500
@@ -72,9 +67,10 @@ def _add_torrent(ses: lt.session, source: str, dest_dir: Path) -> lt.torrent_han
 def _wait_for_metadata(ses: lt.session, handle: lt.torrent_handle) -> None:
     """Block until the torrent's metadata is available (magnet links only).
 
-    Raises ``RuntimeError`` if metadata does not arrive within the timeout.
+    Raises ``RuntimeError`` if metadata does not arrive within ``bt_no_data_timeout``
+    (a dead swarm never delivers the .torrent metadata).
     """
-    deadline = time.monotonic() + _METADATA_TIMEOUT
+    deadline = time.monotonic() + cfg.bt_no_data_timeout
     while not handle.status().has_metadata:
         if time.monotonic() > deadline:
             raise RuntimeError(
@@ -150,11 +146,26 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
 
         # Download loop: emit progress on real byte movement only (avoid flooding
         # the SSE channel while stalled waiting for peers).
+        #
+        # Two deadlines guard against a torrent that never makes progress, so a
+        # dead swarm can't occupy the (single) BT worker forever:
+        #   - first_data_deadline: no bytes at all within bt_no_data_timeout
+        #     after metadata resolves (peers never connected / never sent).
+        #   - stall deadline: reset whenever new bytes arrive; if no movement
+        #     for bt_stall_timeout the swarm has gone quiet mid-download.
         prev_done = -1
+        first_data_deadline = time.monotonic() + cfg.bt_no_data_timeout
+        stall_deadline = first_data_deadline
+        saw_data = False
         while not handle.status().is_finished:
             s = handle.status()
             done = int(s.total_wanted_done)
             if done != prev_done:
+                if done > 0:
+                    # Any new bytes: this is the first-data check satisfied and
+                    # the stall timer refreshed.
+                    saw_data = True
+                    stall_deadline = time.monotonic() + cfg.bt_stall_timeout
                 progress_hook({
                     "status": "downloading",
                     "downloaded_bytes": done,
@@ -162,6 +173,18 @@ def download_sync(source: str, dest_dir: Path, progress_hook) -> tuple[str, Path
                     "filename": torrent_name,
                 })
                 prev_done = done
+            now = time.monotonic()
+            if not saw_data and now > first_data_deadline:
+                raise RuntimeError(
+                    "Timed out waiting for the torrent to start downloading. "
+                    "No peers sent data - the swarm may be dead or unreachable."
+                )
+            if saw_data and now > stall_deadline:
+                raise RuntimeError(
+                    "The download stalled (no progress for "
+                    f"{cfg.bt_stall_timeout}s). The swarm went quiet; it may "
+                    "resume later, but it can't block the downloader."
+                )
             ses.wait_for_alert(_POLL_MS)
 
         progress_hook({"status": "finished"})

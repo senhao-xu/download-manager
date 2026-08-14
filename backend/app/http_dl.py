@@ -125,7 +125,11 @@ def download_sync(url: str, dest_dir: Path, progress_hook) -> tuple[str, Path, i
         stream=True,
         impersonate=_impersonate(),
         proxy=_proxy(),
-        timeout=60,
+        # Tuple (connect, read). Under stream=True curl_cffi maps this to
+        # CONNECTTIMEOUT + a LOW_SPEED_TIME window (connect+read), so a server
+        # that connects but then stops sending bytes is aborted rather than
+        # hanging the worker. See curl_cffi requests/utils.py.
+        timeout=(cfg.http_connect_timeout, cfg.http_stall_timeout),
         allow_redirects=True,
     )
     if resp.status_code >= 400:

@@ -1,111 +1,215 @@
 import { useEffect, useRef, useState } from 'react'
-import type { JobStatus } from './types'
+import type { JobStatus, OwnerTab } from './types'
+import { getJob, listActiveJobs } from './api'
 import { triggerDownload } from './JobView'
 
 /**
- * Shared active-job store, instantiated ONCE at the App level so each tab's job
- * and its SSE subscription survive tab component mount/unmount.
+ * Multi-job store, instantiated ONCE at the App level.
  *
- * Each tab owns an independent job + EventSource tracked by tab key, so starting
- * a download in one tab never disturbs a download running in another. The job
- * snapshots live in React state (so they re-render) and the `EventSource`s live
- * in a ref (mutated, not rendered); both are at the App level, so a tab that
- * unmounts while its download runs keeps progressing in the background, and the
- * job is still there when the user switches back.
+ * Every job the frontend knows about - whether started this session or restored
+ * from the server after a reload - lives in a single `Map<id, JobStatus>`. Each
+ * in-flight job owns one EventSource for live progress. Jobs are global (not
+ * per-tab); a tab renders the subset whose `kind` matches.
  *
- * `reset` is tab-scoped: it clears only the calling tab's job/stream, so the
- * "clear my previous job before starting a new one" pattern in each tab no
- * longer clobbers downloads running on other tabs.
+ * Key behaviors:
+ *  - `start()` is called on a user gesture; the started job_id is recorded in
+ *    `gestureRef` so its single-file result auto-downloads exactly once.
+ *    Restored jobs are NOT in `gestureRef`, so they never auto-download (no
+ *    gesture -> the browser would block it anyway).
+ *  - `restore()` runs on mount: fetches all in-flight jobs and re-subscribes,
+ *    so closing/reopening the page brings live progress back.
+ *  - The per-job SSE reconnect/reconcile logic (with generation guard + backoff)
+ *    survives a stream drop without stranding an in-flight download.
+ *  - When a job goes terminal we bump `historyRefreshTick` (so HistoryList
+ *    refetches and the completed item appears), then auto-dismiss the active row
+ *    after a short delay once history has caught up.
  */
 
-export type OwnerTab = 'youtube' | 'http' | 'bt'
+const MAX_RECONNECT_ATTEMPTS = 6
 
-type JobMap = Record<OwnerTab, JobStatus | null>
-type EsMap = Record<OwnerTab, EventSource | null>
-// Per-tab job_id we have already auto-downloaded, so a restored `done` job
-// does not trigger a second (non-gesture) browser download.
-type AutoTriggeredMap = Record<OwnerTab, string | null>
+export function useJobs() {
+  const [jobs, setJobs] = useState<Map<string, JobStatus>>(new Map())
+  const [historyRefreshTick, setHistoryRefreshTick] = useState(0)
 
-const EMPTY_JOBS: JobMap = { youtube: null, http: null, bt: null }
-const EMPTY_ES: EsMap = { youtube: null, http: null, bt: null }
-
-export function useActiveJob() {
-  const [jobs, setJobs] = useState<JobMap>(EMPTY_JOBS)
-  const esRef = useRef<EsMap>(EMPTY_ES)
-  const autoTriggeredRef = useRef<AutoTriggeredMap>({ youtube: null, http: null, bt: null })
+  const esRef = useRef<Map<string, EventSource>>(new Map())
+  // job ids already auto-downloaded (one-shot, prevents re-trigger)
+  const autoTriggeredRef = useRef<Set<string>>(new Set())
+  // job ids started via a user gesture THIS session -> eligible for auto-download
+  const gestureRef = useRef<Set<string>>(new Set())
+  // per-job generation: bumped on (re)subscribe/dismiss so stale reconnects bail
+  const genRef = useRef<Map<string, number>>(new Map())
+  // StrictMode-safe restore guard
+  const restoredRef = useRef(false)
+  // pending auto-dismiss timers (jobId -> timeout)
+  const dismissTimers = useRef<Map<string, number>>(new Map())
+  // job ids that have already gone terminal this session (idempotent onTerminal)
+  const terminalRef = useRef<Set<string>>(new Set())
 
   // Close every stream when App unmounts (in practice: never, while the page lives).
   useEffect(
     () => () => {
-      (Object.keys(esRef.current) as OwnerTab[]).forEach((t) => esRef.current[t]?.close())
+      esRef.current.forEach((es) => es.close())
+      esRef.current.clear()
+      dismissTimers.current.forEach((id) => clearTimeout(id))
+      dismissTimers.current.clear()
     },
     [],
   )
 
-  function setJobFor(tab: OwnerTab, j: JobStatus | null) {
-    setJobs((prev) => ({ ...prev, [tab]: j }))
+  function setJob(j: JobStatus) {
+    setJobs((prev) => {
+      const next = new Map(prev)
+      next.set(j.id, j)
+      return next
+    })
   }
 
-  function subscribe(tab: OwnerTab, jobId: string) {
-    esRef.current[tab]?.close()
+  function removeJob(jobId: string) {
+    setJobs((prev) => {
+      if (!prev.has(jobId)) return prev
+      const next = new Map(prev)
+      next.delete(jobId)
+      return next
+    })
+  }
+
+  /** Apply a snapshot, including the one-shot auto-download for gesture jobs. */
+  function applyJob(j: JobStatus) {
+    setJob(j)
+    if (
+      j.status === 'done' &&
+      !autoTriggeredRef.current.has(j.id) &&
+      gestureRef.current.has(j.id)
+    ) {
+      const urls = j.download_urls?.length ? j.download_urls : (j.download_url ? [j.download_url] : [])
+      if (urls.length === 1) {
+        autoTriggeredRef.current.add(j.id)
+        triggerDownload(urls[0])
+      }
+    }
+  }
+
+  function genOf(jobId: string): number {
+    return genRef.current.get(jobId) ?? 0
+  }
+
+  /** When the SSE stream drops, reconcile via REST and resubscribe if still running. */
+  function reconcile(jobId: string, gen: number, attempt: number) {
+    if (genOf(jobId) !== gen) return // superseded
+    getJob(jobId)
+      .then((j) => {
+        if (genOf(jobId) !== gen) return
+        if (j.status === 'done' || j.status === 'error') {
+          applyJob(j)
+          return
+        }
+        if (attempt < MAX_RECONNECT_ATTEMPTS) {
+          const backoff = Math.min(1000 * 2 ** attempt, 16000)
+          window.setTimeout(() => {
+            if (genOf(jobId) !== gen) return
+            subscribe(jobId, gen, attempt + 1)
+          }, backoff)
+        }
+      })
+      .catch(() => {
+        if (genOf(jobId) !== gen) return
+        if (attempt < MAX_RECONNECT_ATTEMPTS) {
+          const backoff = Math.min(1000 * 2 ** attempt, 16000)
+          window.setTimeout(() => {
+            if (genOf(jobId) !== gen) return
+            reconcile(jobId, gen, attempt + 1)
+          }, backoff)
+        }
+      })
+  }
+
+  function subscribe(jobId: string, gen?: number, reconnectAttempt = 0) {
+    const g = gen ?? (genRef.current.get(jobId) ?? 0) + 1
+    genRef.current.set(jobId, g)
+    esRef.current.get(jobId)?.close()
     const es = new EventSource(`/api/jobs/${jobId}/events`)
-    esRef.current[tab] = es
+    esRef.current.set(jobId, es)
     es.onmessage = (ev) => {
+      if (genOf(jobId) !== g) return
       const j = JSON.parse(ev.data) as JobStatus
-      setJobFor(tab, j)
-      // Auto-download only a single-file job, once, on the original Start
-      // gesture's tick. Guarded per-tab by job_id so a job restored after it
-      // finished (stream already closed) never re-triggers.
-      if (j.status === 'done' && autoTriggeredRef.current[tab] !== jobId) {
-        const urls = j.download_urls?.length ? j.download_urls : (j.download_url ? [j.download_url] : [])
-        if (urls.length === 1) {
-          autoTriggeredRef.current[tab] = jobId
-          triggerDownload(urls[0])
+      applyJob(j)
+      if (j.status === 'done' || j.status === 'error') {
+        es.close()
+        if (!terminalRef.current.has(j.id)) {
+          terminalRef.current.add(j.id)
+          onTerminal(j.id)
         }
       }
-      if (j.status === 'done' || j.status === 'error') es.close()
     }
-    es.onerror = () => es.close()
+    es.onerror = () => {
+      es.close()
+      if (genOf(jobId) !== g) return
+      reconcile(jobId, g, reconnectAttempt)
+    }
+  }
+
+  /** On a job going terminal: refresh history now, auto-dismiss the row shortly. */
+  function onTerminal(jobId: string) {
+    setHistoryRefreshTick((n) => n + 1)
+    // Give HistoryList time to refetch and show the completed row, then drop the
+    // active row (dedup hides the history copy meanwhile, so no flicker).
+    if (dismissTimers.current.has(jobId)) clearTimeout(dismissTimers.current.get(jobId)!)
+    const id = window.setTimeout(() => {
+      dismissTimers.current.delete(jobId)
+      esRef.current.get(jobId)?.close()
+      esRef.current.delete(jobId)
+      // bump generation so any in-flight reconcile bails, then drop the row
+      genRef.current.set(jobId, genOf(jobId) + 1)
+      removeJob(jobId)
+    }, 2500)
+    dismissTimers.current.set(jobId, id)
   }
 
   /**
-   * Called by a tab when the user clicks Start.
-   *
-   * `starter` performs the API call and returns a job_id; `initial` is the
-   * queued JobStatus to show immediately (its `id` may be empty - `start`
-   * patches the real id once the API responds). If `starter` throws, the job
-   * is left cleared so the tab can show its own error.
+   * Called by a tab on a user gesture (Start). `initial.kind` must be set.
+   * Awaits the API to get the real job_id, then tracks + subscribes.
    */
   async function start(
-    owner: OwnerTab,
     starter: () => Promise<string>,
     initial: JobStatus,
   ): Promise<void> {
-    esRef.current[owner]?.close()
-    autoTriggeredRef.current[owner] = null
-    setJobFor(owner, initial)
     try {
       const jobId = await starter()
-      setJobFor(owner, { ...initial, id: jobId })
-      subscribe(owner, jobId)
+      gestureRef.current.add(jobId)
+      setJob({ ...initial, id: jobId })
+      subscribe(jobId)
     } catch (err) {
-      // Leave it to the caller's catch; clear our partial job.
-      setJobFor(owner, null)
+      // Leave it to the caller's catch; nothing was added to the map.
       throw err
     }
   }
 
-  function reset(tab: OwnerTab) {
-    esRef.current[tab]?.close()
-    esRef.current[tab] = null
-    autoTriggeredRef.current[tab] = null
-    setJobFor(tab, null)
+  /** Restore in-flight jobs on mount. Idempotent (StrictMode-safe). */
+  async function restore() {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    try {
+      const active = await listActiveJobs()
+      for (const j of active) {
+        setJob(j)
+        subscribe(j.id) // NOT added to gestureRef -> no auto-download on restore
+      }
+    } catch {
+      // Network/down: non-fatal; the user can still start new jobs.
+      restoredRef.current = false
+    }
   }
 
-  /** The active job for `tab`, or null if it has none. */
-  function jobFor(tab: OwnerTab): JobStatus | null {
-    return jobs[tab]
+  /** Active jobs for `kind`, non-terminal first then by recency. */
+  function jobsFor(kind: OwnerTab): JobStatus[] {
+    const all = [...jobs.values()].filter((j) => j.kind === kind)
+    return all.sort((a, b) => {
+      const ta = a.status === 'queued' || a.status === 'running' ? 0 : 1
+      const tb = b.status === 'queued' || b.status === 'running' ? 0 : 1
+      if (ta !== tb) return ta - tb
+      return 0 // preserve insertion (recency) order within the same group
+    })
   }
 
-  return { jobFor, start, reset }
+  return { jobsFor, start, restore, historyRefreshTick }
 }

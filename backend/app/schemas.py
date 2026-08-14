@@ -71,6 +71,9 @@ class JobStatus(BaseModel):
     error: str | None = None
     download_url: str | None = None
     download_urls: list[str] = Field(default_factory=list)
+    # "youtube" | "http" | "bt" - lets the frontend group active jobs by tab and
+    # merge them with the kind-filtered history. None only if unset (legacy).
+    kind: str | None = None
 
 
 class SettingsUpdate(BaseModel):

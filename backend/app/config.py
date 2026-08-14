@@ -28,6 +28,18 @@ class Settings:
     # torrents don't block video downloads. BT listens on TCP+UDP for peers/DHT.
     bt_max_concurrent: int = int(os.getenv("BT_MAX_CONCURRENT", "1"))
     bt_listen_port: int = int(os.getenv("BT_LISTEN_PORT", "6881"))
+    # How long (s) to wait for the first byte from a magnet before giving up.
+    bt_no_data_timeout: int = int(os.getenv("BT_NO_DATA_TIMEOUT", "120"))
+    # How long (s) a download may stall (no new bytes) mid-download before
+    # giving up. Bounds a torrent whose swarm goes quiet after starting.
+    bt_stall_timeout: int = int(os.getenv("BT_STALL_TIMEOUT", "300"))
+
+    # HTTP relay connect/read timeouts (curl_cffi tuple). The read value is also
+    # the LOW_SPEED_TIME window (curl aborts if speed stays < 1 B/s this long),
+    # so a stalled server can't hang the worker. HTTP_STALL_TIMEOUT overrides the
+    # read half only; connect stays short for fast failure on dead hosts.
+    http_connect_timeout: float = float(os.getenv("HTTP_CONNECT_TIMEOUT", "15"))
+    http_stall_timeout: float = float(os.getenv("HTTP_STALL_TIMEOUT", "60"))
 
 
 settings = Settings()

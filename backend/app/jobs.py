@@ -27,6 +27,7 @@ logger = logging.getLogger("jobs")
 @dataclass
 class Job:
     id: str
+    kind: str | None = None  # "youtube" | "http" | "bt"
     status: str = "queued"  # queued | running | done | error
     progress: float = 0.0
     current: int | None = None
@@ -50,8 +51,8 @@ _executor = ThreadPoolExecutor(max_workers=settings.max_concurrent, thread_name_
 _bt_executor = ThreadPoolExecutor(max_workers=settings.bt_max_concurrent, thread_name_prefix="bt-worker")
 
 
-def create_job() -> Job:
-    job = Job(id=uuid.uuid4().hex[:12])
+def create_job(kind: str | None = None) -> Job:
+    job = Job(id=uuid.uuid4().hex[:12], kind=kind)
     with _lock:
         _jobs[job.id] = job
     return job
@@ -74,6 +75,22 @@ def is_running(job_id: str) -> bool:
         return bool(j and j.status in ("queued", "running"))
 
 
+def list_active(kind: str | None = None) -> list[JobStatus]:
+    """Snapshots of all in-flight (queued/running) jobs, newest-updated first.
+
+    Used by ``GET /api/jobs`` so the frontend can restore live progress after a
+    page reload. ``kind`` ("youtube"|"http"|"bt") optionally filters; None
+    returns every active job. Terminal jobs are excluded - they live in history.
+    """
+    with _lock:
+        matched = [
+            j for j in _jobs.values()
+            if j.status in ("queued", "running") and (kind is None or j.kind == kind)
+        ]
+    matched.sort(key=lambda j: j.updated, reverse=True)
+    return [snapshot(j) for j in matched]
+
+
 def snapshot(job: Job) -> JobStatus:
     with _lock:
         if job.files and not job.download_url:
@@ -94,6 +111,7 @@ def snapshot(job: Job) -> JobStatus:
             error=job.error,
             download_url=urls[0] if urls else None,
             download_urls=urls,
+            kind=job.kind,
         )
 
 
@@ -111,11 +129,19 @@ def _friendly_error(e: Exception) -> str:
         return "That URL is not supported or is not a valid video/playlist link."
     if "http error 403" in low or "forbidden" in low:
         return "The source returned 403 Forbidden (may block non-browser clients). Try a different video or configure cookies/proxy."
+    # ---- HTTP relay: connection / stall failures ----
+    if "timed out" in low or "operation timed out" in low or "could not resolve host" in low \
+            or "connection refused" in low or "connection reset" in low or "failed to connect" in low:
+        return "Could not reach the server, or it stopped sending data (stalled). Check the URL, your network/proxy, and try again."
     # ---- BitTorrent / libtorrent ----
     if "missing info-hash" in low or "invalid info-hash" in low:
         return "That magnet link has a missing or invalid info-hash. Check the link and try again."
     if "timed out fetching torrent metadata" in low:
         return "Timed out fetching torrent metadata. The magnet link may be dead (no peers) or the swarm is unreachable."
+    if "timed out waiting for the torrent to start" in low:
+        return "No peers sent any data in time. The torrent's swarm may be dead - try another source or again later."
+    if "download stalled" in low and "swarm went quiet" in low:
+        return "The download stalled with no progress for too long. The swarm went quiet - try again later."
     if "invalid or corrupt" in low and "torrent" in low:
         return "That .torrent file is invalid or corrupt."
     if "could not be read" in low and "torrent" in low:
@@ -150,13 +176,13 @@ def _basename(p: str | None) -> str | None:
 
 
 def start_single(url: str, quality: str) -> Job:
-    job = create_job()
+    job = create_job("youtube")
     _executor.submit(_run_single, job, url, quality)
     return job
 
 
 def start_batch(urls: list[str], quality: str, zip_mode: bool = False, title: str | None = None) -> Job:
-    job = create_job()
+    job = create_job("youtube")
     job.total = len(urls)
     _executor.submit(_run_batch, job, urls, quality, zip_mode, title)
     return job
@@ -164,7 +190,7 @@ def start_batch(urls: list[str], quality: str, zip_mode: bool = False, title: st
 
 def start_http(urls: list[str]) -> Job:
     """Start an HTTP relay download job for one or more direct URLs."""
-    job = create_job()
+    job = create_job("http")
     job.total = len(urls)
     _executor.submit(_run_http, job, urls)
     return job
@@ -175,7 +201,7 @@ def start_bt(source: str) -> Job:
 
     Runs on the dedicated BT executor so it does not occupy a yt-dlp/HTTP slot.
     """
-    job = create_job()
+    job = create_job("bt")
     job.total = 1
     _bt_executor.submit(_run_bt, job, source)
     return job

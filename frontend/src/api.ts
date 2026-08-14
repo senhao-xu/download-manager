@@ -1,4 +1,4 @@
-import type { CookieCheckResult, HistoryList, InfoResponse, SettingsState, TestResult } from './types'
+import type { CookieCheckResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult } from './types'
 
 async function postJSON(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
@@ -42,6 +42,23 @@ export async function startHttpDownload(urls: string[]): Promise<string> {
   if (!r.ok) throw new Error(await readError(r))
   const j = await r.json()
   return j.job_id as string
+}
+
+/** Fetch the current snapshot of a job (SSE reconciliation / reconnect). */
+export async function getJob(jobId: string): Promise<JobStatus> {
+  const r = await fetch(`/api/jobs/${jobId}`)
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+/** All in-flight (queued/running) jobs, newest first. Used to restore live
+ *  progress after a page reload. `kind` filters to one tab. */
+export async function listActiveJobs(kind?: string): Promise<JobStatus[]> {
+  const params = new URLSearchParams()
+  if (kind) params.set('kind', kind)
+  const r = await fetch(`/api/jobs?${params.toString()}`)
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
 }
 
 export async function startBtMagnet(magnet: string): Promise<string> {

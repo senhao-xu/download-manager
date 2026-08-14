@@ -1,8 +1,9 @@
+import { useEffect } from 'react'
 import { useLang, useTheme, useTab } from './i18n'
 import { YouTubeTab } from './YouTubeTab'
 import { HttpTab } from './HttpTab'
 import { BtTab } from './BtTab'
-import { useActiveJob } from './useActiveJob'
+import { useJobs } from './useActiveJob'
 import type { JobStatus } from './types'
 
 export default function App() {
@@ -11,16 +12,17 @@ export default function App() {
   const { tab, setTab } = useTab()
   const themeTitle = `${t('themeToggle')} (${t(choice === 'dark' ? 'themeDark' : choice === 'light' ? 'themeLight' : 'themeSystem')})`
 
-  // One active-job store at App level: each tab's job + its SSE stream survive
-  // tab component mount/unmount, so switching tabs no longer drops an in-flight
-  // download. Tabs run concurrently and independently; each renders only its own
-  // job (jobFor). `reset` is bound to the current tab so a tab clearing its own
-  // job never clobbers a download running on another tab.
-  const active = useActiveJob()
+  // One multi-job store at App level: every in-flight job (started this session
+  // OR restored from the server after a reload) lives here, each with its own
+  // SSE stream. Switching/closing tabs never drops a download. On mount we
+  // restore any jobs still running server-side so live progress survives a
+  // page reload.
+  const jobs = useJobs()
+  useEffect(() => { void jobs.restore() }, [jobs])
   const tabProps = {
-    active: active.jobFor(tab),
-    startJob: (starter: () => Promise<string>, initial: JobStatus) => active.start(tab, starter, initial),
-    reset: () => active.reset(tab),
+    activeJobs: jobs.jobsFor(tab),
+    startJob: (starter: () => Promise<string>, initial: JobStatus) => jobs.start(starter, initial),
+    refreshKey: jobs.historyRefreshTick,
   }
 
   const ThemeIcon = () => {

@@ -1,26 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLang } from './i18n'
-import { JobView } from './JobView'
 import { HistoryList } from './HistoryList'
 import { startBtMagnet, startBtTorrentFile } from './api'
-import type { ActiveJobProps, JobStatus } from './types'
+import type { JobStatus, TabJobProps } from './types'
 
-export function BtTab({ active, startJob, reset }: ActiveJobProps) {
+export function BtTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
   const { t } = useLang()
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const [historyRefresh, setHistoryRefresh] = useState(0)
-  const doneId = active?.status === 'done' ? active.id : null
-  useEffect(() => {
-    if (doneId) setHistoryRefresh((n) => n + 1)
-  }, [doneId])
 
   async function onStart(e: React.FormEvent) {
     e.preventDefault()
     const magnet = text.trim()
-    reset()
     setError(null)
     try {
       let starter: () => Promise<string>
@@ -40,6 +33,7 @@ export function BtTab({ active, startJob, reset }: ActiveJobProps) {
         starter,
         {
           id: '',
+          kind: 'bt',
           status: 'queued',
           progress: 0,
           current: 0,
@@ -55,8 +49,6 @@ export function BtTab({ active, startJob, reset }: ActiveJobProps) {
       setError(err instanceof Error ? err.message : t('startFailed'))
     }
   }
-
-  const running = !!active && active.status === 'running'
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -93,14 +85,13 @@ export function BtTab({ active, startJob, reset }: ActiveJobProps) {
           />
           {file && <span className="bt-file-name">{file.name}</span>}
         </label>
-        <button type="submit" className="primary" disabled={running}>
+        <button type="submit" className="primary">
           {t('downloadBt')}
         </button>
       </form>
       <p className="hint">{t('btHint')}</p>
       {error && <div className="error">{error}</div>}
-      {active && <JobView job={active} />}
-      <HistoryList kind="bt" refreshKey={historyRefresh} />
+      <HistoryList kind="bt" activeJobs={activeJobs} refreshKey={refreshKey} />
     </>
   )
 }
