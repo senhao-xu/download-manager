@@ -1,5 +1,7 @@
 # Download Manager
 
+English | [中文](README.zh-CN.md)
+
 A self-hosted web app to download from multiple sources: direct HTTP(S) links,
 YouTube videos/playlists (selectable quality), and BitTorrent (magnet / .torrent).
 Paste a URL, pick options, download.
