@@ -1,11 +1,14 @@
 """Persistent, user-editable settings (cookies + proxy + JS runtime).
 
 Stored on disk so they survive restarts and can be edited from the web UI:
-  <data_dir>/settings.json  -> {proxy, js_runtimes}
-  <data_dir>/cookies.txt    -> Netscape cookies.txt pasted by the user
+  <data_dir>/settings.json            -> {proxy, js_runtimes}
+  <data_dir>/cookies.txt              -> global Netscape cookies.txt (pasted by user)
+  <data_dir>/bilibili_cookies.txt     -> Bilibili-specific cookies (SESSDATA etc.)
 
 effective_opts() merges UI settings over env-var fallbacks to produce the
-yt-dlp options used for every request.
+yt-dlp options used for every request. Passing ``site="bilibili"`` prefers the
+Bilibili-specific cookie file so a user can log in to bilibili.com without
+mixing its cookies into the global file used for every other site.
 """
 import json
 import threading
@@ -28,6 +31,10 @@ def _settings_path() -> Path:
 
 def _cookies_path() -> Path:
     return cfg.data_dir / "cookies.txt"
+
+
+def _bilibili_cookies_path() -> Path:
+    return cfg.data_dir / "bilibili_cookies.txt"
 
 
 def load() -> dict:
@@ -76,6 +83,26 @@ def clear_cookies() -> None:
         pass
 
 
+def save_bilibili_cookies(content: str) -> None:
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    _bilibili_cookies_path().write_text(content, "utf-8")
+
+
+def has_bilibili_cookies() -> bool:
+    p = _bilibili_cookies_path()
+    try:
+        return p.exists() and p.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def clear_bilibili_cookies() -> None:
+    try:
+        _bilibili_cookies_path().unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _js_runtimes_opt(value: str) -> dict:
     # yt-dlp expects {runtime: config-dict}; the value MUST be a dict (not None),
     # because YoutubeDL._js_runtimes does config.get('path').
@@ -83,13 +110,26 @@ def _js_runtimes_opt(value: str) -> dict:
     return {r: {} for r in runtimes if r in _ALLOWED_RUNTIMES} or {"node": {}}
 
 
-def effective_opts() -> dict:
-    """yt-dlp opts derived from UI settings (over env fallbacks)."""
+def effective_opts(site: str = "default") -> dict:
+    """yt-dlp opts derived from UI settings (over env fallbacks).
+
+    ``site="bilibili"`` prefers the Bilibili-specific cookie file so a user can
+    log in to bilibili.com (SESSDATA) for high quality / member content. Falls
+    back to the global cookie file (which may already contain bilibili.com),
+    then env-var fallbacks.
+    """
     s = load()
     opts: dict = {"js_runtimes": _js_runtimes_opt(s.get("js_runtimes", "node"))}
 
-    # cookies: UI-saved file takes precedence over env YTDLP_COOKIEFILE
-    if has_cookies():
+    # cookies: site-specific UI file > global UI file > env fallback
+    if site == "bilibili":
+        if has_bilibili_cookies():
+            opts["cookiefile"] = str(_bilibili_cookies_path())
+        elif has_cookies():
+            opts["cookiefile"] = str(_cookies_path())
+        elif cfg.bilibili_cookiefile or cfg.cookiefile:
+            opts["cookiefile"] = cfg.bilibili_cookiefile or cfg.cookiefile
+    elif has_cookies():
         opts["cookiefile"] = str(_cookies_path())
     elif cfg.cookiefile:
         opts["cookiefile"] = cfg.cookiefile
@@ -115,4 +155,6 @@ def public_state() -> dict:
         "js_runtimes": s.get("js_runtimes", "node"),
         "cookies_configured": has_cookies(),
         "cookiefile_env": bool(cfg.cookiefile),
+        "bilibili_cookies_configured": has_bilibili_cookies(),
+        "bilibili_cookiefile_env": bool(cfg.bilibili_cookiefile),
     }

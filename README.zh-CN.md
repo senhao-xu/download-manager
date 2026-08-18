@@ -3,7 +3,7 @@
 [English](README.md) | 中文
 
 一个自托管的 Web 下载应用，支持多种来源：HTTP(S) 直链、YouTube 视频/播放列表
-（可选清晰度）、以及 BitTorrent（磁力链 / .torrent 文件）。
+（可选清晰度）、哔哩哔哩视频/播放列表、以及 BitTorrent（磁力链 / .torrent 文件）。
 粘贴链接、选择选项、开始下载。
 
 - **后端**：Python + FastAPI，以库的形式内嵌 [yt-dlp](https://github.com/yt-dlp/yt-dlp)（nightly 版本）。
@@ -11,7 +11,8 @@
 - **下载** 在进程内线程池中运行，实时显示进度（SSE）；播放列表多选会打包成
   zip；HTTP 中继和 BitTorrent 各有独立的工作线程池。文件按 TTL 自动清理。
 - **标签页**：**HTTP** 页（服务器作为中继的直接下载）、**YouTube** 页
-  （Cookie/代理在页面内配置，并自动检测 Cookie 可用性）、**BT** 页
+  （Cookie/代理在页面内配置，并自动检测 Cookie 可用性）、**哔哩哔哩** 页
+  （单视频 + 分P/合集，独立的 Cookie 用于 1080P+ / 大会员内容）、**BT** 页
   （通过 libtorrent 处理磁力链 / .torrent）。
 - **历史记录**：按标签页分列、分页（每页 10 条），内嵌在各标签页下方。
 - **主题与语言**：深色/浅色/跟随系统主题切换，以及中文/English 切换（右上角），
@@ -65,6 +66,16 @@ yt-dlp 支持的非 YouTube 来源（如 archive.org）无需这些配置即可�
 > 版 yt-dlp。如果解析突然失败，请重新构建镜像或升级 yt-dlp：
 > `pip install --pre -U yt-dlp`。
 
+## 哔哩哔哩：配置 Cookie 解锁更高清晰度
+
+B 站对**匿名**访问会限制在 720P 左右（实际往往更低）；**1080P 及以上画质，
+以及大会员内容，需要登录账号**。要解锁，请切换到 **哔哩哔哩** 标签页，展开
+**设置**，粘贴从已登录浏览器导出的 `cookies.txt`（必须包含 `bilibili.com`
+域名，如 `SESSDATA`）。这些 Cookie 会存放在**独立**的文件中，与全局 YouTube
+Cookie 分开。若未配置 B 站专用 Cookie，而全局 `cookies.txt` 已包含
+`bilibili.com`，则会自动作为备用。分P（多 P）视频和合集支持通过勾选列表/
+批量下载，体验与 YouTube 播放列表一致。
+
 ## 本地开发
 
 ```bash
@@ -102,6 +113,7 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | `TTL_MINUTES` | `60` | 超过此时间的文件会被删除 |
 | `MAX_CONCURRENT` | `3` | 并发下载工作线程数 |
 | `YTDLP_COOKIEFILE` | _(无)_ | `cookies.txt` 的兜底路径（UI 优先） |
+| `YTDLP_BILIBILI_COOKIEFILE` | _(无)_ | B 站 `cookies.txt` 的兜底路径（UI 优先） |
 | `YTDLP_PROXY` | _(无)_ | 兜底 HTTP/SOCKS 代理（UI 优先） |
 | `YTDLP_IMPERSONATE` | _(无)_ | 浏览器 TLS 伪装目标（如 `chrome`） |
 | `YTDLP_SLEEP_INTERVAL` | `0` | 请求间延迟（防限流） |
@@ -118,26 +130,33 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}`（HTTP 中继下载） |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}`（BitTorrent 磁力链） |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}`（BitTorrent 种子文件） |
-| GET | `/api/jobs/glm-5.3_common` | - | 任务状态快照 |
-| GET | `/api/jobs/glm-5.3_common/events` | - | SSE 进度流 |
-| GET | `/api/files/glm-5.3_common` | - | 下载的文件或 zip |
-| GET | `/api/files/glm-5.3_common/{index}` | - | 多文件任务中的单个文件 |
+| POST | `/api/download-bilibili` | `{url, quality}` | `{job_id}`（哔哩哔哩视频） |
+| POST | `/api/download-bilibili-batch` | `{urls[], quality}` | `{job_id}`（哔哩哔哩分P/合集） |
+| GET | `/api/jobs/{id}` | - | 任务状态快照 |
+| GET | `/api/jobs/{id}/events` | - | SSE 进度流 |
+| GET | `/api/files/{id}` | - | 下载的文件或 zip |
+| GET | `/api/files/{id}/{index}` | - | 多文件任务中的单个文件 |
 | GET | `/api/history` | - | 历史下载及文件是否仍在磁盘上 |
 | GET | `/api/settings` | - | 当前设置（不含 cookie 内容） |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | 更新后的设置 |
 | PUT | `/api/settings/cookies` | 原始 `cookies.txt` 文本 | `{cookies_configured}` |
 | DELETE | `/api/settings/cookies` | - | `{cookies_configured}` |
+| PUT | `/api/settings/bilibili-cookies` | 原始 `cookies.txt` 文本 | `{bilibili_cookies_configured}` |
+| DELETE | `/api/settings/bilibili-cookies` | - | `{bilibili_cookies_configured}` |
 | POST | `/api/settings/test` | `{url}` | `{ok, title, error}` 连接测试 |
 | POST | `/api/settings/check-cookies` | `{url}` | `{state, title, detail}` Cookie 可用性检测 |
+| POST | `/api/settings/bilibili-check-cookies` | `{url}` | `{state, title, detail}` B 站 Cookie 检测 |
 
 `quality` 为 `"best"`（默认）或形如 `"1080"` 的分辨率高度。
 
 ## 功能特性
 
 - **标签页** - **YouTube** 页（粘贴视频/播放列表链接，选择清晰度，下载）、
-  **HTTP** 页（粘贴一条或多条 HTTP(S) 直链；服务器以中继方式流式下载并
-  提供文件，带实时进度）、**BT** 页（粘贴磁力链或上传 `.torrent` 文件；
-  通过 BitTorrent 下载，带实时进度）。记住上次选择的标签页。
+  **哔哩哔哩** 页（粘贴 `bilibili.com` / `b23.tv` 视频或分P/合集链接，
+  选择清晰度；独立 Cookie 用于 1080P+ / 大会员内容）、**HTTP** 页
+  （粘贴一条或多条 HTTP(S) 直链；服务器以中继方式流式下载并提供文件，
+  带实时进度）、**BT** 页（粘贴磁力链或上传 `.torrent` 文件；通过
+  BitTorrent 下载，带实时进度）。记住上次选择的标签页。
 - **BitTorrent** - 通过 `libtorrent` 支持磁力链和 `.torrent` 文件（不做种：
   达到 100% 后立即停止任务）。BT 使用独立的工作线程池
   （`BT_MAX_CONCURRENT`），不会阻塞 YouTube/HTTP 下载；运行中的 BT 任务
@@ -154,5 +173,6 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 
 ## 法律声明
 
-YouTube 的服务条款禁止在 YouTube 未提供下载链接的情况下下载内容。本项目
-仅供**个人使用**。你有责任遵守所在司法管辖区的适用法律及 YouTube 服务条款。
+YouTube 的服务条款禁止在 YouTube 未提供下载链接的情况下下载内容，哔哩哔哩
+也通过自己的条款对其服务访问加以限制。本项目仅供**个人使用**。你有责任遵守
+所在司法管辖区的适用法律及各平台的服务条款。

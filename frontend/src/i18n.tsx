@@ -116,6 +116,16 @@ const translations: Record<Lang, Record<string, string>> = {
     cancelDownload: 'Cancel',
     paused: 'Paused',
     cancelled: 'Cancelled',
+    tabBilibili: 'Bilibili',
+    kindBilibili: 'Bilibili',
+    bilibiliUrlPlaceholder: 'https://www.bilibili.com/video/BV…  or  …/list/…',
+    bilibiliHint: '1080P+ and member content need Bilibili login cookies. Open Settings and paste cookies from a logged-in browser.',
+    bilibiliCookiesHint: 'For Bilibili, export a cookies.txt from a logged-in browser (must include bilibili.com, e.g. SESSDATA) and paste it here. Without login cookies, quality is capped at ~720P.',
+    bilibiliCookiesFallbackHint: '(a global cookies.txt already contains bilibili.com, so it is used as a fallback)',
+    bilibiliCookieWorking: '✓ Cookies are working (Bilibili accessible)',
+    bilibiliCookieBlocked: '✗ Cookies not working - Bilibili still blocked/limited. Cookies may be expired/invalid, or a proxy is needed.',
+    bilibiliCookieNetworkError: '✗ Cannot reach Bilibili. Check your proxy.',
+    bilibiliTestUrlPlaceholder: 'https://www.bilibili.com/video/…',
   },
   zh: {
     appTitle: '下载管理器',
@@ -223,6 +233,16 @@ const translations: Record<Lang, Record<string, string>> = {
     cancelDownload: '取消',
     paused: '已暂停',
     cancelled: '已取消',
+    tabBilibili: '哔哩哔哩',
+    kindBilibili: '哔哩哔哩',
+    bilibiliUrlPlaceholder: 'https://www.bilibili.com/video/BV… 或 …/list/…',
+    bilibiliHint: '1080P 及以上画质、会员内容需要 B 站登录 Cookie。在设置中粘贴已登录浏览器导出的 Cookie。',
+    bilibiliCookiesHint: 'B 站需从已登录浏览器导出 cookies.txt（须包含 bilibili.com，如 SESSDATA）粘贴到这里。不配置登录 Cookie，画质会被限制在 720P 左右。',
+    bilibiliCookiesFallbackHint: '（全局 cookies.txt 已包含 bilibili.com，将自动作为备用）',
+    bilibiliCookieWorking: '✓ Cookie 可用（可访问哔哩哔哩）',
+    bilibiliCookieBlocked: '✗ Cookie 不可用 - B 站仍被拦截/受限。Cookie 可能已过期/失效，或需要代理。',
+    bilibiliCookieNetworkError: '✗ 无法访问哔哩哔哩，请检查代理。',
+    bilibiliTestUrlPlaceholder: 'https://www.bilibili.com/video/…',
   },
 }
 
@@ -286,12 +306,12 @@ export function useTheme() {
   return { choice, theme: resolved, cycle }
 }
 
-export type Tab = 'youtube' | 'http' | 'bt'
+export type Tab = 'youtube' | 'http' | 'bt' | 'bilibili'
 
 export function useTab() {
   const [tab, setTabState] = useState<Tab>(() => {
     const stored = typeof localStorage !== 'undefined' && localStorage.getItem('tab')
-    return stored === 'http' ? 'http' : stored === 'bt' ? 'bt' : stored === 'youtube' ? 'youtube' : 'http'
+    return stored === 'bilibili' ? 'bilibili' : stored === 'http' ? 'http' : stored === 'bt' ? 'bt' : stored === 'youtube' ? 'youtube' : 'http'
   })
   const setTab = (next: Tab) => {
     localStorage.setItem('tab', next)

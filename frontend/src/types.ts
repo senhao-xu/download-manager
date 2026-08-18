@@ -1,5 +1,5 @@
 // Mirrors backend/app/schemas.py
-export type OwnerTab = 'youtube' | 'http' | 'bt'
+export type OwnerTab = 'youtube' | 'http' | 'bt' | 'bilibili'
 
 export interface TabJobProps {
   /** Active (queued/running/just-finished) jobs of this tab's kind, newest first. */
@@ -58,6 +58,8 @@ export interface SettingsState {
   js_runtimes: string
   cookies_configured: boolean
   cookiefile_env: boolean
+  bilibili_cookies_configured: boolean
+  bilibili_cookiefile_env: boolean
 }
 
 export interface TestResult {
@@ -75,7 +77,7 @@ export interface CookieCheckResult {
 
 export interface HistoryEntry {
   id: string
-  kind: string // "youtube" | "http"
+  kind: string // "youtube" | "http" | "bt" | "bilibili"
   title: string | null
   source: string | null
   filename: string | null

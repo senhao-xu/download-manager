@@ -3,8 +3,8 @@
 English | [中文](README.zh-CN.md)
 
 A self-hosted web app to download from multiple sources: direct HTTP(S) links,
-YouTube videos/playlists (selectable quality), and BitTorrent (magnet / .torrent).
-Paste a URL, pick options, download.
+YouTube videos/playlists (selectable quality), Bilibili videos/playlists, and
+BitTorrent (magnet / .torrent). Paste a URL, pick options, download.
 
 - **Backend**: Python + FastAPI, embedding [yt-dlp](https://github.com/yt-dlp/yt-dlp) (nightly) as a library.
 - **Frontend**: React (Vite) SPA, served by the backend.
@@ -13,7 +13,8 @@ Paste a URL, pick options, download.
   Files are TTL-cleaned from disk.
 - **Tabs**: an **HTTP** tab (server-as-relay direct downloads), a **YouTube** tab
   (cookies/proxy configured inline, with automatic cookie-availability checks),
-  and a **BT** tab (magnet / .torrent via libtorrent).
+  a **Bilibili** tab (single videos + multi-part/playlist, with its own cookies
+  for 1080P+ / member content), and a **BT** tab (magnet / .torrent via libtorrent).
 - **History**: per-tab, paginated (10 per page), inline under each tab.
 - **Theme & language**: dark/light/system theme toggle and 中文/English toggle (top-right);
   choices are remembered.
@@ -68,6 +69,17 @@ non-YouTube sources supported by yt-dlp (e.g. archive.org) work without them.
 > **nightly** yt-dlp. If extraction suddenly fails, rebuild or bump yt-dlp:
 > `pip install --pre -U yt-dlp`.
 
+## Bilibili: cookies unlock higher quality
+
+Bilibili caps **anonymous** access at roughly 720P (often less); **1080P and above,
+and 大会员 (VIP) content, require a logged-in account**. To unlock them, switch to
+the **Bilibili** tab, expand **Settings**, and paste a `cookies.txt` exported from
+a logged-in browser (it must include the `bilibili.com` domain, e.g. `SESSDATA`).
+These are stored in a **separate** file from the global YouTube cookies. If no
+Bilibili cookies are set, a global `cookies.txt` that already contains
+`bilibili.com` is used as a fallback. Multi-part (分P) videos and collections are
+supported via the checkbox list / batch download, same as YouTube playlists.
+
 ## Local development
 
 ```bash
@@ -105,6 +117,7 @@ block (persisted to `DATA_DIR`). These env vars are defaults/fallbacks:
 | `TTL_MINUTES` | `60` | Files older than this are deleted |
 | `MAX_CONCURRENT` | `3` | Concurrent download workers |
 | `YTDLP_COOKIEFILE` | _(none)_ | Fallback path to a `cookies.txt` (UI overrides) |
+| `YTDLP_BILIBILI_COOKIEFILE` | _(none)_ | Fallback path to a Bilibili `cookies.txt` (UI overrides) |
 | `YTDLP_PROXY` | _(none)_ | Fallback HTTP/SOCKS proxy (UI overrides) |
 | `YTDLP_IMPERSONATE` | _(none)_ | Browser TLS impersonation target (e.g. `chrome`) |
 | `YTDLP_SLEEP_INTERVAL` | `0` | Delay between requests (anti-throttle) |
@@ -121,6 +134,8 @@ block (persisted to `DATA_DIR`). These env vars are defaults/fallbacks:
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}` (HTTP relay download) |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}` (BitTorrent magnet) |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}` (BitTorrent file) |
+| POST | `/api/download-bilibili` | `{url, quality}` | `{job_id}` (Bilibili video) |
+| POST | `/api/download-bilibili-batch` | `{urls[], quality}` | `{job_id}` (Bilibili multi-part/playlist) |
 | GET | `/api/jobs/{id}` | - | Job status snapshot |
 | GET | `/api/jobs/{id}/events` | - | SSE progress stream |
 | GET | `/api/files/{id}` | - | The downloaded file or zip |
@@ -130,15 +145,20 @@ block (persisted to `DATA_DIR`). These env vars are defaults/fallbacks:
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | Updated settings |
 | PUT | `/api/settings/cookies` | raw `cookies.txt` text | `{cookies_configured}` |
 | DELETE | `/api/settings/cookies` | - | `{cookies_configured}` |
+| PUT | `/api/settings/bilibili-cookies` | raw `cookies.txt` text | `{bilibili_cookies_configured}` |
+| DELETE | `/api/settings/bilibili-cookies` | - | `{bilibili_cookies_configured}` |
 | POST | `/api/settings/test` | `{url}` | `{ok, title, error}` connection check |
 | POST | `/api/settings/check-cookies` | `{url}` | `{state, title, detail}` cookie-availability check |
+| POST | `/api/settings/bilibili-check-cookies` | `{url}` | `{state, title, detail}` Bilibili cookie check |
 
 `quality` is `"best"` (default) or a height like `"1080"`.
 
 ## Features
 
 - **Tabs** - a **YouTube** tab (paste a video/playlist URL, pick quality,
-  download), an **HTTP** tab (paste one or more direct HTTP(S) links; the
+  download), a **Bilibili** tab (paste a `bilibili.com` / `b23.tv` video or
+  multi-part/collection URL, pick quality; own cookies for 1080P+ / member
+  content), an **HTTP** tab (paste one or more direct HTTP(S) links; the
   server stream-downloads them through itself as a relay and serves the files,
   with live progress), and a **BT** tab (paste a magnet link or upload a
   `.torrent` file; downloads via BitTorrent with live progress). The selected
@@ -160,5 +180,6 @@ block (persisted to `DATA_DIR`). These env vars are defaults/fallbacks:
 ## Legal
 
 YouTube's Terms of Service prohibit downloading content unless YouTube provides a
-download link. This project is intended for **personal use**. You are responsible
-for compliance with applicable laws and YouTube's ToS in your jurisdiction.
+download link, and Bilibili restricts access to its services through its own
+terms. This project is intended for **personal use**. You are responsible for
+compliance with applicable laws and each platform's terms in your jurisdiction.

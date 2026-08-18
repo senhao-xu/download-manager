@@ -56,6 +56,19 @@ class BtMagnetRequest(BaseModel):
     magnet: str
 
 
+class BilibiliDownloadRequest(BaseModel):
+    url: str
+    quality: str = "best"
+
+
+class BilibiliBatchRequest(BaseModel):
+    urls: list[str]
+    quality: str = "best"
+    zip: bool = False
+    # multi-part / list title (from /info); used to name the zip when zip=True.
+    title: str | None = None
+
+
 class JobCreated(BaseModel):
     job_id: str
 

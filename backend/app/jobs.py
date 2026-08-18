@@ -28,7 +28,7 @@ logger = logging.getLogger("jobs")
 @dataclass
 class Job:
     id: str
-    kind: str | None = None  # "youtube" | "http" | "bt"
+    kind: str | None = None  # "youtube" | "http" | "bt" | "bilibili"
     status: str = "queued"  # queued | running | done | error
     progress: float = 0.0
     current: int | None = None
@@ -192,6 +192,20 @@ def _friendly_error(e: Exception) -> str:
         return "That URL is not supported or is not a valid video/playlist link."
     if "http error 403" in low or "forbidden" in low:
         return "The source returned 403 Forbidden (may block non-browser clients). Try a different video or configure cookies/proxy."
+    # ---- Bilibili ----
+    if "upgrade to the bilibili app" in low or "app to watch" in low \
+            or ("bilibili" in low and any(k in low for k in ("login", "sign in", "登录", "会员"))):
+        return (
+            "This Bilibili video requires a login (or is app/member-only). Open the "
+            "Bilibili tab > Settings and paste cookies from a logged-in browser "
+            "(must include bilibili.com, e.g. SESSDATA) to unlock it."
+        )
+    if "http error 412" in low:
+        return (
+            "Bilibili rejected the request (412 anti-hotlink). This usually happens "
+            "for anonymous/unauthorized access - configure Bilibili cookies and/or "
+            "a proxy in the Bilibili tab settings."
+        )
     # ---- HTTP relay: connection / stall failures ----
     if "timed out" in low or "operation timed out" in low or "could not resolve host" in low \
             or "connection refused" in low or "connection reset" in low or "failed to connect" in low:
@@ -240,14 +254,33 @@ def _basename(p: str | None) -> str | None:
 
 def start_single(url: str, quality: str) -> Job:
     job = create_job("youtube")
-    _executor.submit(_run_single, job, url, quality)
+    _executor.submit(_run_single, job, url, quality, "youtube", "default")
     return job
 
 
 def start_batch(urls: list[str], quality: str, zip_mode: bool = False, title: str | None = None) -> Job:
     job = create_job("youtube")
     job.total = len(urls)
-    _executor.submit(_run_batch, job, urls, quality, zip_mode, title)
+    _executor.submit(_run_batch, job, urls, quality, zip_mode, title, "youtube", "default")
+    return job
+
+
+def start_bilibili(url: str, quality: str) -> Job:
+    """Start a Bilibili download (single video, or one URL of a multi-part set).
+
+    Reuses the yt-dlp pipeline (yt-dlp natively supports bilibili.com), with
+    ``site="bilibili"`` so the Bilibili-specific cookie file is used.
+    """
+    job = create_job("bilibili")
+    _executor.submit(_run_single, job, url, quality, "bilibili", "bilibili")
+    return job
+
+
+def start_bilibili_batch(urls: list[str], quality: str, zip_mode: bool = False, title: str | None = None) -> Job:
+    """Start a Bilibili multi-part / playlist (分P/合集) download."""
+    job = create_job("bilibili")
+    job.total = len(urls)
+    _executor.submit(_run_batch, job, urls, quality, zip_mode, title, "bilibili", "bilibili")
     return job
 
 
@@ -314,7 +347,7 @@ def _record_history(job: Job, kind: str, source: str | None,
         logger.exception("failed to record history for job %s", job.id)
 
 
-def _run_single(job: Job, url: str, quality: str):
+def _run_single(job: Job, url: str, quality: str, kind: str = "youtube", site: str = "default"):
     _set(job, status="running", phase="starting")
     d = storage.job_dir(job.id)
 
@@ -337,7 +370,7 @@ def _run_single(job: Job, url: str, quality: str):
     try:
         if job.cancel_event.is_set():
             raise JobCancelled()
-        info, files = downloader.download_sync(url, quality, d, hook)
+        info, files = downloader.download_sync(url, quality, d, hook, site)
         f = files[0]
         name = _filename(_safe_base(info.get("title"), f.stem), f.suffix)
         _set(
@@ -351,7 +384,7 @@ def _run_single(job: Job, url: str, quality: str):
             files=[(str(f), name)],
             download_url=f"/api/files/{job.id}",
         )
-        _record_history(job, "youtube", url, str(f), name, media_type(str(f)))
+        _record_history(job, kind, url, str(f), name, media_type(str(f)))
     except JobCancelled:
         _set(job, status="cancelled", phase="cancelled")
     except Exception as e:
@@ -362,7 +395,8 @@ def _run_single(job: Job, url: str, quality: str):
             _set(job, status="error", error=_friendly_error(e), phase="error")
 
 
-def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: str | None = None):
+def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: str | None = None,
+               kind: str = "youtube", site: str = "default"):
     total = len(urls)
     _set(job, status="running", phase="starting", total=total, current=0)
     d = storage.job_dir(job.id)
@@ -392,7 +426,7 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
                 elif ev.get("status") == "finished":
                     _set(job, progress=min(99.5, base + span))
 
-            info, files = downloader.download_sync(url, quality, d, hook)
+            info, files = downloader.download_sync(url, quality, d, hook, site)
             seq = i + 1
             for f in files:
                 name = _filename(_safe_base(info.get("title"), f.stem), f.suffix, index=seq)
@@ -416,7 +450,7 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
                 download_url=f"/api/files/{job.id}",
             )
             _record_history(
-                job, "youtube", urls[0] if urls else None,
+                job, kind, urls[0] if urls else None,
                 str(zip_path), zip_name, media_type(str(zip_path)),
             )
         else:
@@ -433,7 +467,7 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
             )
             for path, name in saved:
                 _record_history(
-                    job, "youtube", None, path, name, media_type(path),
+                    job, kind, None, path, name, media_type(path),
                 )
     except JobCancelled:
         _set(job, status="cancelled", phase="cancelled")

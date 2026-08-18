@@ -26,10 +26,11 @@ async def run_blocking(fn, *args, **kwargs):
     return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
-def _base_opts(extra: dict | None = None) -> dict:
+def _base_opts(extra: dict | None = None, site: str = "default") -> dict:
     # Start from user settings (cookies / proxy / js_runtimes), then app defaults.
+    # site="bilibili" makes effective_opts pick the Bilibili cookie file.
     opts: dict = {
-        **effective_opts(),
+        **effective_opts(site=site),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -99,16 +100,16 @@ def _normalize_info(info: dict) -> InfoResponse:
     )
 
 
-def extract_info_sync(url: str) -> InfoResponse:
-    with YoutubeDL(_base_opts({"extract_flat": False})) as ydl:
+def extract_info_sync(url: str, site: str = "default") -> InfoResponse:
+    with YoutubeDL(_base_opts({"extract_flat": False}, site=site)) as ydl:
         info = ydl.extract_info(url, download=False)
     if info is None:
         raise DownloadError("No information could be extracted from that URL.")
     return _normalize_info(info)
 
 
-async def extract_info(url: str) -> InfoResponse:
-    return await run_blocking(extract_info_sync, url)
+async def extract_info(url: str, site: str = "default") -> InfoResponse:
+    return await run_blocking(extract_info_sync, url, site)
 
 
 def format_for_quality(quality: str) -> str:
@@ -140,18 +141,20 @@ def _new_files(dest_dir: Path, before: set[str]) -> list[Path]:
     return new
 
 
-def download_sync(url: str, quality: str, dest_dir: Path, progress_hook) -> tuple[dict, list[Path]]:
+def download_sync(url: str, quality: str, dest_dir: Path, progress_hook,
+                  site: str = "default") -> tuple[dict, list[Path]]:
     """Download one video; returns (info_dict, [newly-created file paths]).
 
     Uses a before/after diff of the dest dir so that batch downloads (which share
     one dir) only report this video's file, not files from earlier videos.
+    ``site="bilibili"`` selects Bilibili-specific cookies (see settings.py).
     """
     fmt = format_for_quality(quality)
     opts = _base_opts({
         "format": fmt,
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
         "progress_hooks": [progress_hook],
-    })
+    }, site=site)
     before = {p.name for p in dest_dir.iterdir()} if dest_dir.is_dir() else set()
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)

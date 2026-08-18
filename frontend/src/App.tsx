@@ -3,6 +3,7 @@ import { useLang, useTheme, useTab } from './i18n'
 import { YouTubeTab } from './YouTubeTab'
 import { HttpTab } from './HttpTab'
 import { BtTab } from './BtTab'
+import { BilibiliTab } from './BilibiliTab'
 import { useJobs } from './useActiveJob'
 import type { JobStatus } from './types'
 
@@ -91,6 +92,12 @@ export default function App() {
           {t('tabYouTube')}
         </button>
         <button
+          className={tab === 'bilibili' ? 'active' : ''}
+          onClick={() => setTab('bilibili')}
+        >
+          {t('tabBilibili')}
+        </button>
+        <button
           className={tab === 'bt' ? 'active' : ''}
           onClick={() => setTab('bt')}
         >
@@ -99,7 +106,7 @@ export default function App() {
       </nav>
 
       <main>
-        {tab === 'youtube' ? <YouTubeTab {...tabProps} /> : tab === 'http' ? <HttpTab {...tabProps} /> : <BtTab {...tabProps} />}
+        {tab === 'youtube' ? <YouTubeTab {...tabProps} /> : tab === 'bilibili' ? <BilibiliTab {...tabProps} /> : tab === 'http' ? <HttpTab {...tabProps} /> : <BtTab {...tabProps} />}
       </main>
 
       <footer className="footer">
