@@ -20,6 +20,9 @@ class Settings:
 
     # yt-dlp network/auth knobs (fallbacks; the settings UI overrides these)
     cookiefile: str | None = os.getenv("YTDLP_COOKIEFILE") or None
+    # Bilibili-specific cookie file (SESSDATA etc. for 1080P+/member content).
+    # Used by Bilibili downloads when no bilibili_cookies.txt was pasted in the UI.
+    bilibili_cookiefile: str | None = os.getenv("YTDLP_BILIBILI_COOKIEFILE") or None
     proxy: str | None = os.getenv("YTDLP_PROXY") or None
     impersonate: str | None = os.getenv("YTDLP_IMPERSONATE") or None
     sleep_interval: float = float(os.getenv("YTDLP_SLEEP_INTERVAL", "0") or 0)

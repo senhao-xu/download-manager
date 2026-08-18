@@ -109,7 +109,7 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
   const historyItems = (items ?? []).filter((it) => !activeIds.has(it.id))
 
   function kindLabel(k: string): string {
-    return k === 'http' ? t('kindHttp') : k === 'bt' ? t('kindBt') : t('kindYoutube')
+    return k === 'http' ? t('kindHttp') : k === 'bt' ? t('kindBt') : k === 'bilibili' ? t('kindBilibili') : t('kindYoutube')
   }
 
   async function confirmDelete(id: string) {

@@ -12,6 +12,8 @@ from . import downloader, history, jobs
 from . import settings as app_settings
 from .schemas import (
     BatchRequest,
+    BilibiliBatchRequest,
+    BilibiliDownloadRequest,
     BtMagnetRequest,
     CookieCheckResult,
     DownloadRequest,
@@ -95,6 +97,43 @@ def post_download_bt(req: BtMagnetRequest):
     return JobCreated(job_id=job.id)
 
 
+def _is_bilibili_url(u: str) -> bool:
+    low = (u or "").lower().strip()
+    return "bilibili.com" in low or "b23.tv" in low
+
+
+@router.post("/download-bilibili", response_model=JobCreated)
+def post_download_bilibili(req: BilibiliDownloadRequest):
+    """Start a Bilibili download (single video, or one URL of a multi-part set).
+
+    Reuses the yt-dlp pipeline (yt-dlp natively supports bilibili.com); the
+    Bilibili-specific cookie file is applied automatically when configured.
+    """
+    url = req.url.strip()
+    if not _is_bilibili_url(url):
+        raise HTTPException(
+            status_code=400,
+            detail="Not a Bilibili URL. Expecting a bilibili.com or b23.tv link.",
+        )
+    job = jobs.start_bilibili(url, req.quality)
+    return JobCreated(job_id=job.id)
+
+
+@router.post("/download-bilibili-batch", response_model=JobCreated)
+def post_download_bilibili_batch(req: BilibiliBatchRequest):
+    """Start a Bilibili multi-part / playlist (分P/合集) download."""
+    if not req.urls:
+        raise HTTPException(status_code=400, detail="No URLs selected.")
+    bad = [u for u in req.urls if not _is_bilibili_url(u)]
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not a Bilibili URL: {bad[:3]}",
+        )
+    job = jobs.start_bilibili_batch(req.urls, req.quality, req.zip, req.title)
+    return JobCreated(job_id=job.id)
+
+
 @router.post("/download-bt/file", response_model=JobCreated)
 async def post_download_bt_file(file: UploadFile = File(...)):
     """Start a BitTorrent download from an uploaded .torrent file.
@@ -126,7 +165,7 @@ def list_jobs(kind: str | None = None):
     """All in-flight (queued/running) jobs, newest first.
 
     Lets the frontend restore live progress after a page reload. ``kind``
-    ("youtube"|"http"|"bt") optionally filters to one tab.
+    ("youtube"|"http"|"bt"|"bilibili") optionally filters to one tab.
     """
     return jobs.list_active(kind=kind)
 
@@ -232,8 +271,9 @@ def get_file_indexed(job_id: str, index: int):
 def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
     """List past downloads, newest-first, filtered by `kind` and paginated.
 
-    `kind` is one of "youtube" | "http" | "bt" (None = all). `page` is
-    1-indexed; `page_size` defaults to 10 (clamped to [1, 100] in history).
+    `kind` is one of "youtube" | "http" | "bt" | "bilibili" (None = all).
+    `page` is 1-indexed; `page_size` defaults to 10 (clamped to [1, 100] in
+    history).
     `available` reflects on-disk presence.
     """
     recs, total = history.list_page(kind=kind, page=page, page_size=page_size)
@@ -309,6 +349,49 @@ async def put_cookies(request: Request):
 def del_cookies():
     app_settings.clear_cookies()
     return {"ok": True, "cookies_configured": False}
+
+
+# ---- Bilibili-specific cookies (separate from the global file) ----
+# Bilibili caps anonymous access at ~720P; 1080P+ / member content needs a login
+# (SESSDATA etc.). Keeping these in their own file lets users configure it per
+# site without mixing bilibili.com cookies into the file used for every site.
+
+@router.put("/settings/bilibili-cookies")
+async def put_bilibili_cookies(request: Request):
+    content = (await request.body()).decode("utf-8", errors="replace")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Empty cookies content.")
+    app_settings.save_bilibili_cookies(content)
+    return {"ok": True, "bilibili_cookies_configured": True}
+
+
+@router.delete("/settings/bilibili-cookies")
+def del_bilibili_cookies():
+    app_settings.clear_bilibili_cookies()
+    return {"ok": True, "bilibili_cookies_configured": False}
+
+
+@router.post("/settings/bilibili-check-cookies", response_model=CookieCheckResult)
+async def bilibili_check_cookies(req: TestRequest):
+    """Check that the Bilibili cookies get us through Bilibili's anti-bot wall."""
+    if not app_settings.effective_opts(site="bilibili").get("cookiefile"):
+        return CookieCheckResult(state="no_cookies")
+    try:
+        info = await asyncio.wait_for(
+            downloader.extract_info(req.url, site="bilibili"), timeout=45)
+        return CookieCheckResult(state="working", title=info.title)
+    except asyncio.TimeoutError:
+        return CookieCheckResult(state="network_error", detail="Timed out after 45s.")
+    except Exception as e:
+        msg = _friendly(e)
+        low = str(e).lower()
+        if any(k in low for k in ("upgrade to the bilibili app", "app to watch",
+                                  "login", "sign in", "登录", "412")):
+            return CookieCheckResult(state="blocked", detail=msg)
+        if any(k in low for k in ("timeout", "connection", "unreachable", "proxy",
+                                  "timed out", "errno", "resolve", "refused", "reset")):
+            return CookieCheckResult(state="network_error", detail=msg)
+        return CookieCheckResult(state="error", detail=msg)
 
 
 @router.post("/settings/test", response_model=TestResult)

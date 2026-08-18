@@ -37,6 +37,20 @@ export async function startBatch(urls: string[], quality: string, zip: boolean =
   return j.job_id as string
 }
 
+export async function startBilibiliDownload(url: string, quality: string): Promise<string> {
+  const r = await postJSON('/api/download-bilibili', { url, quality })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
+export async function startBilibiliBatch(urls: string[], quality: string, zip: boolean = false, title?: string): Promise<string> {
+  const r = await postJSON('/api/download-bilibili-batch', { urls, quality, zip, title })
+  if (!r.ok) throw new Error(await readError(r))
+  const j = await r.json()
+  return j.job_id as string
+}
+
 export async function startHttpDownload(urls: string[]): Promise<string> {
   const r = await postJSON('/api/download-http', { urls })
   if (!r.ok) throw new Error(await readError(r))
@@ -132,6 +146,26 @@ export async function testConnection(url: string): Promise<TestResult> {
 
 export async function checkCookies(url: string): Promise<CookieCheckResult> {
   const r = await postJSON('/api/settings/check-cookies', { url })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function uploadBilibiliCookies(content: string): Promise<void> {
+  const r = await fetch('/api/settings/bilibili-cookies', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/plain' },
+    body: content,
+  })
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function clearBilibiliCookies(): Promise<void> {
+  const r = await fetch('/api/settings/bilibili-cookies', { method: 'DELETE' })
+  if (!r.ok) throw new Error(await readError(r))
+}
+
+export async function checkBilibiliCookies(url: string): Promise<CookieCheckResult> {
+  const r = await postJSON('/api/settings/bilibili-check-cookies', { url })
   if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
