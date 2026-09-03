@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { CookieCheckResult, SettingsState, TestResult } from './types'
 import {
   getSettings,
-  updateSettings,
   uploadCookies,
   clearCookies,
   testConnection,
@@ -28,8 +27,6 @@ const DEFAULT_TEST_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw'
 export function YouTubeSettings() {
   const { t } = useLang()
   const [state, setState] = useState<SettingsState | null>(null)
-  const [proxy, setProxy] = useState('')
-  const [runtime, setRuntime] = useState('node')
   const [cookiesText, setCookiesText] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [saving, setSaving] = useState('')
@@ -44,8 +41,6 @@ export function YouTubeSettings() {
     getSettings()
       .then((s) => {
         setState(s)
-        setProxy(s.proxy)
-        setRuntime(s.js_runtimes)
         // On entering the YouTube tab: if cookies are already configured, run
         // the availability check automatically.
         if (s.cookies_configured) runCookieCheck()
@@ -66,20 +61,6 @@ export function YouTubeSettings() {
     } finally {
       setChecking(false)
       checkingRef.current = false
-    }
-  }
-
-  async function saveSettings() {
-    setSaving('settings')
-    setMsg(null)
-    try {
-      const s = await updateSettings(proxy, runtime)
-      setState(s)
-      setMsg(t('settingsSaved'))
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setSaving('')
     }
   }
 
@@ -185,27 +166,6 @@ export function YouTubeSettings() {
               {checking ? t('checking') : verdict(cookieCheck!).text}
             </div>
           )}
-        </section>
-
-        <section>
-          <h3>{t('network')}</h3>
-          <label className="field">
-            <span>{t('proxyLabel')}</span>
-            <input type="text" placeholder="http://127.0.0.1:7890" value={proxy} onChange={(e) => setProxy(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>{t('jsRuntime')}</span>
-            <select value={runtime} onChange={(e) => setRuntime(e.target.value)}>
-              <option value="node">node</option>
-              <option value="deno">deno</option>
-              <option value="bun">bun</option>
-            </select>
-          </label>
-          <div className="btn-row">
-            <button className="primary" onClick={saveSettings} disabled={saving === 'settings'}>
-              {saving === 'settings' ? t('saving') : t('saveNetwork')}
-            </button>
-          </div>
         </section>
 
         <section>

@@ -52,6 +52,15 @@ def _resolution(f: dict) -> str | None:
     return None
 
 
+def _https_thumbnail(url: str | None) -> str | None:
+    # Some extractors (Bilibili) return http:// cover URLs. Serving them from an
+    # https page gets blocked as mixed content, so upgrade to https where the
+    # CDN supports it (Bilibili's i*.hdslb.com does).
+    if url and url.startswith("http://"):
+        return "https://" + url[len("http://"):]
+    return url
+
+
 def _normalize_info(info: dict) -> InfoResponse:
     if info.get("_type") == "playlist":
         entries = []
@@ -93,7 +102,7 @@ def _normalize_info(info: dict) -> InfoResponse:
     return InfoResponse(
         is_playlist=False,
         title=info.get("title"),
-        thumbnail=info.get("thumbnail"),
+        thumbnail=_https_thumbnail(info.get("thumbnail")),
         duration=int(dur) if dur else None,
         qualities=heights[:8],
         formats=formats,

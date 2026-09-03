@@ -118,12 +118,6 @@ export async function getSettings(): Promise<SettingsState> {
   return r.json()
 }
 
-export async function updateSettings(proxy: string, js_runtimes: string): Promise<SettingsState> {
-  const r = await postJSON('/api/settings', { proxy, js_runtimes })
-  if (!r.ok) throw new Error(await readError(r))
-  return r.json()
-}
-
 export async function uploadCookies(content: string): Promise<void> {
   const r = await fetch('/api/settings/cookies', {
     method: 'PUT',
