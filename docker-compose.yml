@@ -1,12 +1,12 @@
 services:
   app:
-    # Prebuilt image published to GHCR by CI on every push to main.
-    # Source: https://github.com/senhao-xu/download-manager/pkgs/container/download-manager
-    image: ghcr.io/senhao-xu/download-manager:latest
+    # Local build. To switch back to the CI-published image:
+    #   image: ghcr.io/senhao-xu/download-manager:latest
+    #   pull_policy: always
+    build: .
     container_name: download-manager
-    pull_policy: always
     ports:
-      - "8000:8000"
+      - "9000:8000"
     environment:
       - PORT=8000
       - DATA_DIR=/data

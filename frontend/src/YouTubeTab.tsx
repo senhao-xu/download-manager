@@ -125,7 +125,7 @@ export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
       {info && !info.is_playlist && (
         <div className="card single">
           <div className="single-head">
-            {info.thumbnail && <img src={info.thumbnail} alt="" className="thumb" />}
+            {info.thumbnail && <img src={info.thumbnail} alt="" className="thumb" referrerPolicy="no-referrer" />}
             <div>
               <h2>{info.title}</h2>
               <div className="meta">{fmtDuration(info.duration)} · {t('formatsCount', { n: info.formats.length })}</div>
