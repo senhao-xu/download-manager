@@ -2,6 +2,15 @@ import { useState } from 'react'
 import { useLang } from './i18n'
 import { cancelJob, pauseJob, resumeJob } from './api'
 import type { JobStatus } from './types'
+import { formatBytes } from './format'
+
+function formatEta(seconds: number): string {
+  const value = Math.max(0, Math.ceil(seconds))
+  const hours = Math.floor(value / 3600)
+  const minutes = Math.floor(value / 60) % 60
+  const secs = String(value % 60).padStart(2, '0')
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`
+}
 
 export function triggerDownload(url: string) {
   const a = document.createElement('a')
@@ -38,7 +47,8 @@ export function JobView({ job }: { job: JobStatus }) {
   const { t } = useLang()
   const [busy, setBusy] = useState<string | null>(null)
   const pct = Math.max(0, Math.min(100, job.progress))
-  const isBatch = job.total != null && job.total > 1
+  const itemTotal = job.total ?? 1
+  const isBatch = itemTotal > 1
   const urls = job.download_urls?.length ? job.download_urls : (job.download_url ? [job.download_url] : [])
 
   const DownloadIcon = (
@@ -88,26 +98,39 @@ export function JobView({ job }: { job: JobStatus }) {
     </svg>
   )
 
-  const statusText =
-    job.status === 'done' ? t('done')
-    : job.status === 'error' ? t('failed')
-    : job.status === 'paused' ? t('paused')
-    : job.status === 'cancelled' ? t('cancelled')
-    : `${pct.toFixed(0)}%`
+  const phases: Record<string, string> = {
+    queued: 'queued', starting: 'phaseStarting', downloading: 'phaseDownloading',
+    'processing (merging)': 'phaseMerging', 'packaging zip': 'phasePackaging',
+    'connecting to swarm': 'phaseConnecting', finishing: 'phaseFinishing',
+    done: 'done', error: 'failed', paused: 'paused', cancelled: 'cancelled',
+  }
+  const phase = job.phase || job.status
+  const phaseLabel = t(phases[phase] || (/^downloading \d+\/\d+$/.test(phase) ? 'phaseDownloading' : phase))
+  const indeterminate = !isBatch && job.status === 'running' && job.total_bytes == null && pct === 0
+  const currentItem = isBatch && job.status !== 'done'
+  const downloading = job.status === 'running' && phase.startsWith('downloading')
+  const speed = downloading && job.speed != null ? `${formatBytes(job.speed)}/s` : '—'
+  const eta = downloading && job.eta != null && Number.isFinite(job.eta) ? formatEta(job.eta) : '—'
 
   return (
     <div className={`card job ${job.status}`}>
       <div className="job-head">
-        <span className="job-title">{job.title || (isBatch ? t('playlistDownload') : t('jobDownload'))}</span>
-        {isBatch && job.current != null && <span className="job-count">{job.current + 1}/{job.total}</span>}
-      </div>
-      <div className="progress-track">
-        <div className="progress-fill" style={{ width: `${pct}%` }} />
+        <span className="job-title" title={job.title || undefined}>{job.title || (isBatch ? t('playlistDownload') : t('jobDownload'))}</span>
+        <strong className="job-percent">{indeterminate ? '—' : `${pct.toFixed(1).replace(/\.0$/, '')}%`}</strong>
       </div>
       <div className="job-status-row">
-        <span>{statusText}</span>
-        <span className="job-phase">{job.phase}</span>
+        <span>{phaseLabel}</span>
+        {isBatch && job.current != null && <span className="job-count">{t(job.status === 'done' ? 'batchComplete' : 'currentFile', { n: Math.min(job.current + 1, itemTotal), total: itemTotal })}</span>}
       </div>
+      <div className={`progress-track${indeterminate ? ' indeterminate' : ''}`} role="progressbar" aria-label={t(isBatch ? 'overallProgress' : 'downloadProgress')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : pct}>
+        <div className="progress-fill" style={{ width: indeterminate ? '35%' : `${pct}%` }} />
+      </div>
+      <dl className="job-metrics">
+        <div><dt>{t(currentItem ? 'currentDownloaded' : 'downloadedSize')}</dt><dd>{formatBytes(job.downloaded_bytes ?? 0)}</dd></div>
+        <div><dt>{t(currentItem ? 'currentTotalSize' : 'totalSize')}</dt><dd>{job.total_bytes == null ? t('unknownSize') : `${job.total_bytes_estimated ? t('approximately') : ''}${formatBytes(job.total_bytes)}`}</dd></div>
+        <div><dt>{t('downloadSpeed')}</dt><dd>{speed}</dd></div>
+        <div><dt>{t(currentItem ? 'currentEta' : 'remainingTime')}</dt><dd>{eta}</dd></div>
+      </dl>
       {job.status === 'error' && job.error && <div className="error">{job.error}</div>}
       {showCancel && (
         <div className="job-actions">

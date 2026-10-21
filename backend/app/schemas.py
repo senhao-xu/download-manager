@@ -23,6 +23,7 @@ class InfoResponse(BaseModel):
     is_playlist: bool
     title: str | None = None
     thumbnail: str | None = None
+    thumbnail_candidates: list[str] = Field(default_factory=list)
     duration: int | None = None
     # distinct video heights available, descending (e.g. [1080, 720, 480])
     qualities: list[int] = Field(default_factory=list)
@@ -77,6 +78,13 @@ class JobStatus(BaseModel):
     id: str
     status: str  # queued | running | paused | done | error | cancelled
     progress: float  # 0..100
+    # Current item's transfer bytes (all selected audio/video streams).
+    # For a completed batch these become the aggregate output file sizes.
+    downloaded_bytes: int = 0
+    total_bytes: int | None = None
+    total_bytes_estimated: bool = False
+    speed: float | None = None  # bytes per second
+    eta: float | None = None  # seconds remaining for the current item
     current: int | None = None
     total: int | None = None
     phase: str | None = None

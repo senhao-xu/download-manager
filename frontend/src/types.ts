@@ -31,6 +31,7 @@ export interface InfoResponse {
   is_playlist: boolean
   title: string | null
   thumbnail: string | null
+  thumbnail_candidates?: string[]
   duration: number | null
   qualities: number[]
   formats: VideoFormat[]
@@ -43,6 +44,12 @@ export interface JobStatus {
   id: string
   status: JobState
   progress: number
+  // Optional while a job is optimistically queued or using an older server.
+  downloaded_bytes?: number
+  total_bytes?: number | null
+  total_bytes_estimated?: boolean
+  speed?: number | null
+  eta?: number | null
   current: number | null
   total: number | null
   phase: string | null

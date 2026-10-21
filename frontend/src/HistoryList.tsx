@@ -4,6 +4,8 @@ import { getHistory, deleteHistory } from './api'
 import type { HistoryEntry, JobStatus, OwnerTab } from './types'
 import { triggerDownload } from './JobView'
 import { JobView } from './JobView'
+import { Icon } from './Icon'
+import { formatBytes } from './format'
 
 const PAGE_SIZE = 10
 
@@ -37,14 +39,6 @@ const ArrowRight = (
     <path d="m12 5 7 7-7 7" />
   </svg>
 )
-
-function fmtSize(bytes: number | null): string {
-  if (bytes == null) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
 
 function fmtRelative(ts: number, lang: string): string {
   const now = Date.now() / 1000
@@ -141,8 +135,9 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
   return (
     <div className="history-inline">
       <h3 className="history-inline-head">
-        {t('historyTitle')} <span className="history-count">({total})</span>
-        {hasActive && <span className="history-count"> · {t('activeCount', { n: activeJobs.length })}</span>}
+        <Icon name="history" size={19} />
+        {t('historyTitle')} <span className="history-count">{total}</span>
+        {hasActive && <span className="active-count">{t('activeCount', { n: activeJobs.length })}</span>}
       </h3>
 
       {hasActive && (
@@ -157,8 +152,14 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
 
       {error && <div className="error">{error}</div>}
 
-      {!hasActive && historyItems.length === 0 && (
-        <p className="hint">{t('noHistory')}</p>
+      {!error && !items && <p className="history-loading" role="status">{t('loading')}</p>}
+
+      {!error && items && !hasActive && historyItems.length === 0 && (
+        <div className="history-empty">
+          <span className="empty-icon"><Icon name="download" size={27} /></span>
+          <h4>{t('noHistory')}</h4>
+          <p>{t('noHistoryHint')}</p>
+        </div>
       )}
 
       {historyItems.length > 0 && (
@@ -168,15 +169,16 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
               const src = `/api/files/${it.id}`
               return (
                 <li key={it.id} className={`history-row${it.available ? '' : ' expired'}`}>
+                  <span className="history-file-icon"><Icon name="file" size={21} /></span>
                   <div className="history-main">
-                    <div className="history-title">
+                    <div className="history-title" title={it.title || it.filename || it.id}>
                       {it.title || it.filename || it.id}
                     </div>
                     <div className="history-meta">
                       <span className="badge">{kindLabel(it.kind)}</span>
                       {!it.available && <span className="badge err">{t('expired')}</span>}
                       <span className="history-time">{fmtRelative(it.created, lang)}</span>
-                      {it.size != null && <span className="history-size">{fmtSize(it.size)}</span>}
+                      {it.size != null && <span className="history-size">{formatBytes(it.size)}</span>}
                       {it.source && <span className="history-source" title={it.source}>{it.source}</span>}
                     </div>
                     {deleting === it.id && (

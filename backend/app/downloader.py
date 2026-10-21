@@ -9,12 +9,15 @@ import functools
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from yt_dlp import YoutubeDL
+from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadError
 
 from .schemas import Entry, Format, InfoResponse
 from .settings import effective_opts
+from .thumbnails import thumbnail_url
 
 logger = logging.getLogger("downloader")
 
@@ -56,15 +59,44 @@ def _https_thumbnail(url: str | None) -> str | None:
     # Some extractors (Bilibili) return http:// cover URLs. Serving them from an
     # https page gets blocked as mixed content, so upgrade to https where the
     # CDN supports it (Bilibili's i*.hdslb.com does).
+    if url and url.startswith("//"):
+        return "https:" + url
     if url and url.startswith("http://"):
         return "https://" + url[len("http://"):]
     return url
 
 
+def _thumbnail_candidates(info: dict) -> list[str]:
+    alternatives = [t["url"] for t in reversed(info.get("thumbnails") or []) if t.get("url")]
+    # yt-dlp may prefer a localized /vi_lc/ cover which the CDN no longer
+    # serves. Keep that preference, then try standard covers before variants.
+    def standard_youtube_cover(url):
+        parsed = urlparse(_https_thumbnail(url))
+        return (parsed.hostname or "").endswith(".ytimg.com") and parsed.path.startswith("/vi/")
+
+    alternatives.sort(key=lambda url: not standard_youtube_cover(url))
+    candidates = []
+    for url in [info.get("thumbnail"), *alternatives]:
+        if not url:
+            continue
+        source = thumbnail_url(_https_thumbnail(url))
+        if source not in candidates:
+            candidates.append(source)
+    if not candidates:
+        for entry in info.get("entries") or []:
+            if entry:
+                candidates = _thumbnail_candidates(entry)
+                if candidates:
+                    break
+    return candidates[:12]
+
+
 def _normalize_info(info: dict) -> InfoResponse:
     if info.get("_type") == "playlist":
+        raw_entries = list(info.get("entries") or [])
+        covers = _thumbnail_candidates({**info, "entries": raw_entries})
         entries = []
-        for e in info.get("entries") or []:
+        for e in raw_entries:
             if not e:
                 continue
             entries.append(
@@ -78,6 +110,8 @@ def _normalize_info(info: dict) -> InfoResponse:
         return InfoResponse(
             is_playlist=True,
             title=info.get("title"),
+            thumbnail=covers[0] if covers else None,
+            thumbnail_candidates=covers,
             entries=entries,
         )
     formats = [
@@ -99,10 +133,12 @@ def _normalize_info(info: dict) -> InfoResponse:
         reverse=True,
     )
     dur = info.get("duration")
+    covers = _thumbnail_candidates(info)
     return InfoResponse(
         is_playlist=False,
         title=info.get("title"),
-        thumbnail=_https_thumbnail(info.get("thumbnail")),
+        thumbnail=covers[0] if covers else None,
+        thumbnail_candidates=covers,
         duration=int(dur) if dur else None,
         qualities=heights[:8],
         formats=formats,
@@ -150,6 +186,17 @@ def _new_files(dest_dir: Path, before: set[str]) -> list[Path]:
     return new
 
 
+class _TransferMetadataPP(PostProcessor):
+    """Report selected stream sizes before yt-dlp starts either stream."""
+    def __init__(self, progress_hook):
+        super().__init__()
+        self.progress_hook = progress_hook
+
+    def run(self, info):
+        self.progress_hook({"status": "metadata", "info_dict": info})
+        return [], info
+
+
 def download_sync(url: str, quality: str, dest_dir: Path, progress_hook,
                   site: str = "default") -> tuple[dict, list[Path]]:
     """Download one video; returns (info_dict, [newly-created file paths]).
@@ -166,6 +213,7 @@ def download_sync(url: str, quality: str, dest_dir: Path, progress_hook,
     }, site=site)
     before = {p.name for p in dest_dir.iterdir()} if dest_dir.is_dir() else set()
     with YoutubeDL(opts) as ydl:
+        ydl.add_post_processor(_TransferMetadataPP(progress_hook), when="before_dl")
         info = ydl.extract_info(url, download=True)
     files = _new_files(dest_dir, before)
     if not files:

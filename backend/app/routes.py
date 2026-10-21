@@ -6,9 +6,9 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from . import downloader, history, jobs
+from . import downloader, history, jobs, thumbnails
 from . import settings as app_settings
 from .schemas import (
     BatchRequest,
@@ -51,6 +51,19 @@ async def post_info(req: InfoRequest):
         raise HTTPException(status_code=400, detail=_friendly(e))
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail=_friendly(e))
+
+
+@router.get("/thumbnail")
+async def get_thumbnail(url: str):
+    try:
+        content, mime = await downloader.run_blocking(thumbnails.fetch_thumbnail, url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="Cover image is unavailable.") from e
+    return Response(content=content, media_type=mime, headers={
+        "Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.post("/download", response_model=JobCreated)
