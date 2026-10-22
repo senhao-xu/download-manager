@@ -3,6 +3,8 @@ import { useLang } from './i18n'
 import { HistoryList } from './HistoryList'
 import { startBtMagnet, startBtTorrentFile } from './api'
 import type { JobStatus, TabJobProps } from './types'
+import { DownloadPanel } from './DownloadPanel'
+import { Icon } from './Icon'
 
 export function BtTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
   const { t } = useLang()
@@ -59,38 +61,44 @@ export function BtTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
 
   return (
     <>
-      <form className="url-form http-form" onSubmit={onStart}>
-        <textarea
-          className="url-textarea"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            // Typing a magnet clears a picked file.
-            if (e.target.value.trim() && file) {
-              setFile(null)
-              if (fileInput.current) fileInput.current.value = ''
-            }
-          }}
-          placeholder={t('btPlaceholder')}
-          rows={3}
-          autoFocus
-        />
-        <label className="bt-file-row">
-          <span className="hint">{t('btFileLabel')}:</span>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".torrent,application/x-bittorrent"
-            onChange={onPick}
+      <DownloadPanel source="bt">
+        <form className="url-form http-form" onSubmit={onStart}>
+          <label className="input-label" htmlFor="bt-magnet">{t('magnetLink')}</label>
+          <textarea
+            id="bt-magnet"
+            aria-describedby="bt-hint"
+            className="url-textarea"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value)
+              // Typing a magnet clears a picked file.
+              if (e.target.value.trim() && file) {
+                setFile(null)
+                if (fileInput.current) fileInput.current.value = ''
+              }
+            }}
+            placeholder={t('btPlaceholder')}
+            rows={3}
+            spellCheck={false}
+            autoFocus
           />
-          {file && <span className="bt-file-name">{file.name}</span>}
-        </label>
-        <button type="submit" className="primary">
-          {t('downloadBt')}
-        </button>
-      </form>
-      <p className="hint">{t('btHint')}</p>
-      {error && <div className="error">{error}</div>}
+          <label className="bt-file-row">
+            <span className="hint">{t('btFileLabel')}:</span>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".torrent,application/x-bittorrent"
+              onChange={onPick}
+            />
+            {file && <span className="bt-file-name">{file.name}</span>}
+          </label>
+          <div className="form-bottom">
+            <p className="hint" id="bt-hint"><Icon name="info" size={15} />{t('btHint')}</p>
+            <button type="submit" className="primary"><Icon name="download" size={17} />{t('startDownload')}</button>
+          </div>
+        </form>
+        {error && <div className="error">{error}</div>}
+      </DownloadPanel>
       <HistoryList kind="bt" activeJobs={activeJobs} refreshKey={refreshKey} />
     </>
   )

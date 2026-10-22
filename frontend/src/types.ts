@@ -12,6 +12,7 @@ export interface TabJobProps {
 
 export interface VideoFormat {
   format_id: string | null
+  format_note?: string | null
   ext: string | null
   resolution: string | null
   fps: number | null
@@ -25,16 +26,24 @@ export interface Entry {
   url: string | null
   title: string | null
   duration: number | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  downloaded?: boolean
 }
 
 export interface InfoResponse {
   is_playlist: boolean
   title: string | null
   thumbnail: string | null
+  thumbnail_candidates?: string[]
   duration: number | null
   qualities: number[]
   formats: VideoFormat[]
   entries: Entry[]
+  is_channel?: boolean
+  page?: number
+  page_size?: number
+  has_more?: boolean
 }
 
 export type JobState = 'queued' | 'running' | 'paused' | 'cancelled' | 'done' | 'error'
@@ -43,14 +52,31 @@ export interface JobStatus {
   id: string
   status: JobState
   progress: number
+  // Optional while a job is optimistically queued or using an older server.
+  downloaded_bytes?: number
+  total_bytes?: number | null
+  total_bytes_estimated?: boolean
+  speed?: number | null
+  eta?: number | null
   current: number | null
   total: number | null
   phase: string | null
   title: string | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  resolution?: string | null
+  fps?: number | null
   error: string | null
   download_url: string | null
   download_urls: string[]
   kind: string | null
+  source?: string | null
+}
+
+export interface VideoQueueResponse {
+  jobs: JobStatus[]
+  skipped_downloaded: number
+  skipped_active: number
 }
 
 export interface SettingsState {
@@ -77,8 +103,14 @@ export interface CookieCheckResult {
 
 export interface HistoryEntry {
   id: string
+  key: string
+  download_url: string | null
   kind: string // "youtube" | "http" | "bt" | "bilibili"
   title: string | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  resolution?: string | null
+  fps?: number | null
   source: string | null
   filename: string | null
   size: number | null
@@ -92,4 +124,10 @@ export interface HistoryList {
   total: number
   page: number
   page_size: number
+}
+
+export interface HistoryBatchDeleteResult {
+  removed: string[]
+  missing: string[]
+  failed: { key: string; reason: 'active_job' | 'shared_file' | 'invalid_path' | 'delete_failed' }[]
 }

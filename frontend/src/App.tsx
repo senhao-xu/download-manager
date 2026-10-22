@@ -6,6 +6,14 @@ import { BtTab } from './BtTab'
 import { BilibiliTab } from './BilibiliTab'
 import { useJobs } from './useActiveJob'
 import type { JobStatus } from './types'
+import { Icon } from './Icon'
+
+const sources = [
+  { id: 'http', label: 'tabHTTP', hint: 'httpSourceHint' },
+  { id: 'youtube', label: 'tabYouTube', hint: 'youtubeSourceHint' },
+  { id: 'bilibili', label: 'tabBilibili', hint: 'bilibiliSourceHint' },
+  { id: 'bt', label: 'tabBT', hint: 'btSourceHint' },
+] as const
 
 export default function App() {
   const { t, lang, setLang } = useLang()
@@ -14,8 +22,8 @@ export default function App() {
   const themeTitle = `${t('themeToggle')} (${t(choice === 'dark' ? 'themeDark' : choice === 'light' ? 'themeLight' : 'themeSystem')})`
 
   // One multi-job store at App level: every in-flight job (started this session
-  // OR restored from the server after a reload) lives here, each with its own
-  // SSE stream. Switching/closing tabs never drops a download. On mount we
+  // OR restored from the server after a reload) lives here. Running jobs use
+  // SSE; queued jobs share a poll. Switching tabs never drops a download. We
   // restore any jobs still running server-side so live progress survives a
   // page reload.
   const jobs = useJobs()
@@ -68,48 +76,41 @@ export default function App() {
             <p className="subtitle">{t('subtitle')}</p>
           </div>
           <div className="toolbar">
-            <button className="icon-btn" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} title={t('switchLang')}>
+            <button className="icon-btn" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} title={t('switchLang')} aria-label={t('switchLang')}>
               {lang === 'zh' ? 'EN' : '中'}
             </button>
-            <button className="icon-btn" onClick={cycleTheme} title={themeTitle}>
+            <button className="icon-btn" onClick={cycleTheme} title={themeTitle} aria-label={themeTitle}>
               <ThemeIcon />
             </button>
           </div>
         </div>
       </header>
 
-      <nav className="tabs">
-        <button
-          className={tab === 'http' ? 'active' : ''}
-          onClick={() => setTab('http')}
-        >
-          {t('tabHTTP')}
-        </button>
-        <button
-          className={tab === 'youtube' ? 'active' : ''}
-          onClick={() => setTab('youtube')}
-        >
-          {t('tabYouTube')}
-        </button>
-        <button
-          className={tab === 'bilibili' ? 'active' : ''}
-          onClick={() => setTab('bilibili')}
-        >
-          {t('tabBilibili')}
-        </button>
-        <button
-          className={tab === 'bt' ? 'active' : ''}
-          onClick={() => setTab('bt')}
-        >
-          {t('tabBT')}
-        </button>
-      </nav>
-
       <main>
+        <div className="workspace-heading">
+          <span className="eyebrow">{t('workspace')}</span>
+          <h2>{t('newDownload')}</h2>
+          <p>{t('newDownloadHint')}</p>
+        </div>
+        <nav className="tabs" aria-label={t('downloadSource')}>
+          {sources.map((source) => (
+            <button
+              key={source.id}
+              className={tab === source.id ? 'active' : ''}
+              aria-current={tab === source.id ? 'page' : undefined}
+              onClick={() => setTab(source.id)}
+            >
+              <span className={`source-icon source-${source.id}`}><Icon name={source.id} /></span>
+              <span className="tab-copy"><span>{t(source.label)}</span><small>{t(source.hint)}</small></span>
+              <span className="tab-indicator" aria-hidden="true" />
+            </button>
+          ))}
+        </nav>
         {tab === 'youtube' ? <YouTubeTab {...tabProps} /> : tab === 'bilibili' ? <BilibiliTab {...tabProps} /> : tab === 'http' ? <HttpTab {...tabProps} /> : <BtTab {...tabProps} />}
       </main>
 
       <footer className="footer">
+        <span>{t('footerNote')}</span>
         <a
           className="footer-link"
           href="https://github.com/senhao-xu/download-manager"

@@ -10,6 +10,7 @@ the ``jobs`` ThreadPoolExecutor - never on the event loop.
 """
 import logging
 import re
+import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -148,7 +149,10 @@ def download_sync(url: str, dest_dir: Path, progress_hook, cancel_event=None) ->
     path = dest_dir / name
 
     done = 0
+    started = time.monotonic()
     try:
+        progress_hook({"status": "downloading", "downloaded_bytes": 0,
+                       "total_bytes": total or 0, "filename": name})
         with path.open("wb") as f:
             for chunk in resp.iter_content(_CHUNK):
                 if cancel_event is not None and cancel_event.is_set():
@@ -157,11 +161,13 @@ def download_sync(url: str, dest_dir: Path, progress_hook, cancel_event=None) ->
                     continue
                 f.write(chunk)
                 done += len(chunk)
+                elapsed = time.monotonic() - started
                 progress_hook({
                     "status": "downloading",
                     "downloaded_bytes": done,
                     "total_bytes": total or 0,
                     "filename": name,
+                    "speed": done / elapsed if elapsed > 0 else None,
                 })
     except Exception:
         # Don't leave a partial file behind on failure.
@@ -176,6 +182,7 @@ def download_sync(url: str, dest_dir: Path, progress_hook, cancel_event=None) ->
         except Exception:  # pragma: no cover - defensive
             pass
 
-    progress_hook({"status": "finished"})
+    progress_hook({"status": "finished", "downloaded_bytes": done,
+                   "total_bytes": done, "filename": name})
     logger.info("http download ok: %s -> %s (%d bytes)", url, path, done)
     return name, path, done, mime or "application/octet-stream"

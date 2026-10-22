@@ -13,6 +13,7 @@ services:
       - DOWNLOAD_DIR=/data/downloads
       - TTL_MINUTES=60
       - MAX_CONCURRENT=3
+      - VIDEO_CONNECTIONS=8
       # Cookies + proxy for YouTube are configured inline in the YouTube tab,
       # persisted to /data. They are needed because YouTube blocks non-residential
       # IPs with a bot-detection wall. Env vars below are optional fallbacks:

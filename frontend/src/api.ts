@@ -1,4 +1,4 @@
-import type { CookieCheckResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult } from './types'
+import type { CookieCheckResult, HistoryBatchDeleteResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult, VideoQueueResponse } from './types'
 
 async function postJSON(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
@@ -17,8 +17,14 @@ async function readError(r: Response): Promise<string> {
   }
 }
 
-export async function fetchInfo(url: string): Promise<InfoResponse> {
-  const r = await postJSON('/api/info', { url })
+export async function fetchInfo(url: string, page: number = 1, pageSize: number = 20): Promise<InfoResponse> {
+  const r = await postJSON('/api/info', { url, page, page_size: pageSize })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function queueVideos(entries: { url: string; title: string | null }[], quality: string, skipDownloaded: boolean): Promise<VideoQueueResponse> {
+  const r = await postJSON('/api/download-queue', { entries, quality, skip_downloaded: skipDownloaded })
   if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
@@ -58,9 +64,10 @@ export async function startHttpDownload(urls: string[]): Promise<string> {
   return j.job_id as string
 }
 
-/** Fetch the current snapshot of a job (SSE reconciliation / reconnect). */
-export async function getJob(jobId: string): Promise<JobStatus> {
+/** Fetch a job snapshot; null means the server no longer knows this job. */
+export async function getJob(jobId: string): Promise<JobStatus | null> {
   const r = await fetch(`/api/jobs/${jobId}`)
+  if (r.status === 404) return null
   if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
@@ -173,6 +180,12 @@ export async function getHistory(kind?: string, page: number = 1, pageSize: numb
   params.set('page_size', String(pageSize))
   const r = await fetch(`/api/history?${params.toString()}`)
   if (!r.ok) throw new Error('Failed to load history')
+  return r.json()
+}
+
+export async function deleteHistoryBatch(keys: string[], deleteFiles: boolean = false): Promise<HistoryBatchDeleteResult> {
+  const r = await postJSON('/api/history/batch-delete', { keys, delete_files: deleteFiles })
+  if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
 

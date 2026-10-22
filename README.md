@@ -80,7 +80,7 @@ pip install -r requirements.txt
 pip install --pre -U yt-dlp          # nightly
 uvicorn app.main:app --reload --port 8000
 
-# system deps: ffmpeg, node >= 22 (for yt-dlp-ejs / JS challenges)
+# system deps: ffmpeg, aria2, node >= 22 (for yt-dlp-ejs / JS challenges)
 
 # frontend (separate terminal)
 cd frontend
@@ -94,6 +94,17 @@ Build the frontend for the backend to serve:
 cd frontend && npm run build      # outputs frontend/dist/, served by backend at /
 ```
 
+Run the frontend browser regressions (Node.js 20+, no backend required):
+
+```bash
+cd frontend
+npm ci
+npx playwright install --with-deps chromium --only-shell
+npm test
+```
+
+The tests build the production bundle and use isolated, mocked API responses.
+
 ## Configuration
 
 Most download settings (cookies, proxy) are edited inline in each tab's Settings
@@ -106,6 +117,7 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 | `DOWNLOAD_DIR` | `$DATA_DIR/downloads` | Where downloaded files are stored |
 | `TTL_MINUTES` | `60` | Files older than this are deleted |
 | `MAX_CONCURRENT` | `3` | Concurrent download workers |
+| `VIDEO_CONNECTIONS` | `8` | Connections per video / concurrent HLS-DASH fragments (1–16; 1 disables parallel transfers) |
 | `YTDLP_COOKIEFILE` | _(none)_ | Fallback path to a `cookies.txt` (UI overrides) |
 | `YTDLP_PROXY` | _(none)_ | Fallback HTTP/SOCKS proxy (UI overrides) |
 | `YTDLP_IMPERSONATE` | _(none)_ | Browser TLS impersonation target (e.g. `chrome`) |
@@ -117,9 +129,10 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/info` | `{url}` | Video formats or playlist entries |
+| POST | `/api/info` | `{url, page?, page_size?}` | Video formats, playlist or paginated channel entries |
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
+| POST | `/api/download-queue` | `{entries: [{url, title?}], quality?, skip_downloaded?}` | `{jobs[], skipped_downloaded, skipped_active}` |
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}` (HTTP relay download) |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}` (BitTorrent magnet) |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}` (BitTorrent file) |
@@ -128,6 +141,8 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 | GET | `/api/files/{id}` | - | The downloaded file or zip |
 | GET | `/api/files/{id}/{index}` | - | One file from a multi-file job |
 | GET | `/api/history` | - | Past downloads with on-disk availability |
+| GET/HEAD | `/api/history/files/{key}` | - | One persisted history file, including after restarts |
+| POST | `/api/history/batch-delete` | `{keys: [record_key], delete_files?: false}` | `{removed[], missing[], failed: [{key, reason}]}` (1–100 keys) |
 | GET | `/api/settings` | - | Current settings (no cookie content) |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | Updated settings |
 | PUT | `/api/settings/cookies` | raw `cookies.txt` text | `{cookies_configured}` |
@@ -137,7 +152,25 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 
 `quality` is `"best"` (default) or a height like `"1080"`.
 
+History entries include a per-record `key` and a `download_url` for available
+files. Use these for precise file retrieval/deletion; `id` still identifies the
+download job and may be shared by multiple files.
+
 ## Features
+
+- **YouTube channels**: Channel home pages, `/videos`, `/shorts` and `/streams`
+  load 20 entries per page. Selections persist across pages, with up to 100
+  independent jobs per queue. Available local downloads are skipped by default;
+  active duplicates are always skipped. One failed video does not stop the rest.
+  Jobs respect `MAX_CONCURRENT` (default 3).
+
+- **Parallel video downloads**: HTTP video/audio streams use aria2 with up to
+  `VIDEO_CONNECTIONS` byte-range connections; HLS/DASH uses native parallel
+  fragment downloads. Progress and cancellation work throughout. Unsupported
+  transfers fall back to the native downloader; SOCKS proxies and browser
+  impersonation use native transfers. Install `aria2` for local development
+  (included in Docker). Actual connections and speed depend on the server and
+  file size. `MAX_CONCURRENT` separately controls simultaneous jobs.
 
 - **Tabs** - a **Video** tab (paste a video/playlist URL, pick quality,
   download; cookies/proxy configured inline with automatic cookie checks), an
@@ -154,9 +187,13 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
   config, e.g. add `-p 6881:6881/tcp -p 6881:6881/udp`.
 - **Preview** - completed video/audio downloads play in-page (and images for the
   HTTP tab) without re-downloading.
-- **History** - every completed download is recorded to `<DATA_DIR>/history.jsonl`
-  and listed in the History panel; still-on-disk files can be re-previewed /
-  re-downloaded, expired ones are greyed out. History survives restarts.
+- **History** - completed files are recorded to `<DATA_DIR>/history.jsonl` and
+  listed under each source. Select individual records or the current page to
+  download available files or delete records in a batch. Deletion requires
+  confirmation and keeps local files by default; optionally remove only the
+  selected files. Expired files are skipped when downloading. Selection clears
+  on page/source changes. History and file downloads survive server restarts.
+  Active jobs are managed separately. Browsers may ask to allow multiple downloads.
 - **Theme** - dark / light / **system** (follows the OS preference and updates
   live); language toggle 中文 / English. Choices are remembered.
 

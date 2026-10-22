@@ -6,9 +6,9 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from . import downloader, history, jobs
+from . import downloader, history, jobs, thumbnails
 from . import settings as app_settings
 from .schemas import (
     BatchRequest,
@@ -17,6 +17,8 @@ from .schemas import (
     BtMagnetRequest,
     CookieCheckResult,
     DownloadRequest,
+    HistoryBatchDeleteRequest,
+    HistoryBatchDeleteResult,
     HistoryEntry,
     HistoryList,
     HttpDownloadRequest,
@@ -27,6 +29,8 @@ from .schemas import (
     SettingsUpdate,
     TestRequest,
     TestResult,
+    VideoQueueRequest,
+    VideoQueueResponse,
 )
 from .storage import media_type, job_dir
 from yt_dlp.utils import DownloadError
@@ -46,11 +50,29 @@ def healthz():
 @router.post("/info", response_model=InfoResponse)
 async def post_info(req: InfoRequest):
     try:
-        return await downloader.extract_info(req.url)
+        result = await downloader.extract_info(req.url, page=req.page, page_size=req.page_size)
+        if result.is_channel:
+            available = history.available_video_ids()
+            for entry in result.entries:
+                entry.downloaded = entry.id in available
+        return result
     except DownloadError as e:
         raise HTTPException(status_code=400, detail=_friendly(e))
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail=_friendly(e))
+
+
+@router.get("/thumbnail")
+async def get_thumbnail(url: str):
+    try:
+        content, mime = await downloader.run_blocking(thumbnails.fetch_thumbnail, url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="Cover image is unavailable.") from e
+    return Response(content=content, media_type=mime, headers={
+        "Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.post("/download", response_model=JobCreated)
@@ -65,6 +87,18 @@ async def post_download_batch(req: BatchRequest):
         raise HTTPException(status_code=400, detail="No URLs selected.")
     job = jobs.start_batch(req.urls, req.quality, req.zip, req.title)
     return JobCreated(job_id=job.id)
+
+
+@router.post("/download-queue", response_model=VideoQueueResponse)
+def post_download_queue(req: VideoQueueRequest):
+    try:
+        created, skipped_downloaded, skipped_active = jobs.queue_videos(
+            req.entries, req.quality, req.skip_downloaded,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return VideoQueueResponse(jobs=[jobs.snapshot(job) for job in created],
+                              skipped_downloaded=skipped_downloaded, skipped_active=skipped_active)
 
 
 @router.post("/download-http", response_model=JobCreated)
@@ -279,12 +313,24 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
     recs, total = history.list_page(kind=kind, page=page, page_size=page_size)
     items: list[HistoryEntry] = []
     for rec in recs:
-        path = rec.get("path")
-        available = bool(path) and Path(path).exists()
+        key = history.record_key(rec)
+        try:
+            available = history.record_path(rec).is_file()
+        except (OSError, ValueError, RuntimeError):
+            available = False
+        covers = downloader.thumbnail_candidates(rec)
+        if not covers and rec.get("kind") == "youtube":
+            covers = thumbnails.source_candidates(rec.get("source"))
         items.append(HistoryEntry(
             id=rec.get("id", ""),
+            key=key,
+            download_url=f"/api/history/files/{key}" if available else None,
             kind=rec.get("kind", ""),
             title=rec.get("title"),
+            thumbnail=covers[0] if covers else None,
+            thumbnail_candidates=covers,
+            resolution=rec.get("resolution"),
+            fps=rec.get("fps"),
             source=rec.get("source"),
             filename=rec.get("filename"),
             size=rec.get("size"),
@@ -293,6 +339,25 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
             available=available,
         ))
     return HistoryList(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.api_route("/history/files/{key}", methods=["GET", "HEAD"])
+def get_history_file(key: str):
+    record = history.find_by_key(key)
+    if record is not None:
+        try:
+            path = history.record_path(record)
+            if path.is_file():
+                return FileResponse(path, media_type=media_type(str(path)),
+                                    filename=record.get("filename") or path.name)
+        except (OSError, ValueError, RuntimeError):
+            pass
+    raise HTTPException(status_code=404, detail="History file not available.")
+
+
+@router.post("/history/batch-delete", response_model=HistoryBatchDeleteResult)
+def delete_history_batch(req: HistoryBatchDeleteRequest):
+    return history.delete_by_keys(req.keys, req.delete_files, is_active=jobs.is_running)
 
 
 @router.delete("/history/{job_id}")

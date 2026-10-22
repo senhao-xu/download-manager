@@ -17,9 +17,10 @@ from pathlib import Path
 from yt_dlp.utils import DownloadError
 
 from .config import settings
-from . import downloader, history, http_dl, bt_dl, storage
+from . import downloader, history, http_dl, bt_dl, storage, thumbnails
 from .errors import JobCancelled
 from .schemas import JobStatus
+from .progress import TransferProgress
 from .storage import media_type
 
 logger = logging.getLogger("jobs")
@@ -31,10 +32,20 @@ class Job:
     kind: str | None = None  # "youtube" | "http" | "bt" | "bilibili"
     status: str = "queued"  # queued | running | done | error
     progress: float = 0.0
+    downloaded_bytes: int = 0
+    total_bytes: int | None = None
+    total_bytes_estimated: bool = False
+    speed: float | None = None
+    eta: float | None = None
     current: int | None = None
     total: int | None = None
     phase: str | None = None
     title: str | None = None
+    source: str | None = None
+    thumbnail: str | None = None
+    thumbnail_candidates: list[str] = field(default_factory=list)
+    resolution: str | None = None
+    fps: float | None = None
     error: str | None = None
     download_url: str | None = None
     result_path: str | None = None
@@ -165,14 +176,24 @@ def snapshot(job: Job) -> JobStatus:
             id=job.id,
             status=job.status,
             progress=round(job.progress, 1),
+            downloaded_bytes=job.downloaded_bytes,
+            total_bytes=job.total_bytes,
+            total_bytes_estimated=job.total_bytes_estimated,
+            speed=job.speed,
+            eta=job.eta,
             current=job.current,
             total=job.total,
             phase=job.phase,
             title=job.title,
+            thumbnail=job.thumbnail,
+            thumbnail_candidates=list(job.thumbnail_candidates),
+            resolution=job.resolution,
+            fps=job.fps,
             error=job.error,
             download_url=urls[0] if urls else None,
             download_urls=urls,
             kind=job.kind,
+            source=job.source,
         )
 
 
@@ -254,8 +275,48 @@ def _basename(p: str | None) -> str | None:
 
 def start_single(url: str, quality: str) -> Job:
     job = create_job("youtube")
+    _set(job, source=url)
     _executor.submit(_run_single, job, url, quality, "youtube", "default")
     return job
+
+
+def queue_videos(entries, quality: str, skip_downloaded: bool = True) -> tuple[list[Job], int, int]:
+    prepared = []
+    for entry in entries:
+        video_id = thumbnails.youtube_video_id(entry.url)
+        if not video_id:
+            raise ValueError("Select individual YouTube video links to add to the queue.")
+        prepared.append((video_id, entry.title, f"https://www.youtube.com/watch?v={video_id}"))
+    available = history.available_video_ids() if skip_downloaded else set()
+    created = []
+    skipped_downloaded = skipped_active = 0
+    # Reserve every ID before submitting workers, atomically across requests.
+    with _lock:
+        active = set()
+        for job in _jobs.values():
+            video_id = thumbnails.youtube_video_id(job.source) if job.kind == "youtube" else None
+            if video_id and job.status in {"queued", "running", "paused"}:
+                active.add(video_id)
+            elif (video_id and skip_downloaded and job.status == "done"
+                  and job.result_path and Path(job.result_path).is_file()):
+                # A worker can finish just before its history record is written.
+                available.add(video_id)
+        for video_id, title, url in prepared:
+            if video_id in available:
+                skipped_downloaded += 1
+                continue
+            if video_id in active:
+                skipped_active += 1
+                continue
+            covers = thumbnails.source_candidates(url)
+            job = Job(id=uuid.uuid4().hex[:12], kind="youtube", source=url, title=title,
+                      thumbnail=covers[0] if covers else None, thumbnail_candidates=covers)
+            _jobs[job.id] = job
+            created.append(job)
+            active.add(video_id)
+    for job in created:
+        _executor.submit(_run_single, job, job.source, quality, "youtube", "default")
+    return created, skipped_downloaded, skipped_active
 
 
 def start_batch(urls: list[str], quality: str, zip_mode: bool = False, title: str | None = None) -> Job:
@@ -315,14 +376,33 @@ def start_bt_with_job(job: Job, source: str) -> Job:
 
 
 def _set(job: Job, **kw):
+    if kw.get("status") in ("done", "error", "cancelled", "paused"):
+        kw.update(speed=None, eta=None)
     with _lock:
         for k, v in kw.items():
             setattr(job, k, v)
         job.updated = time.time()
 
 
+def _completed_bytes(paths) -> dict:
+    size = sum(Path(path).stat().st_size for path in paths)
+    return {"downloaded_bytes": size, "total_bytes": size, "total_bytes_estimated": False}
+
+
+def _video_metadata(info: dict) -> dict:
+    covers = downloader.thumbnail_candidates(info)
+    # Use the selected stream, not the full format catalogue or requested tier.
+    video = next((fmt for fmt in (info.get("requested_formats") or [info])
+                  if fmt.get("height")), {})
+    width, height = video.get("width"), video.get("height")
+    resolution = f"{width}x{height}" if width and height else f"{height}p" if height else None
+    return {"thumbnail": covers[0] if covers else None, "thumbnail_candidates": covers,
+            "resolution": resolution, "fps": video.get("fps") if height else None}
+
+
 def _record_history(job: Job, kind: str, source: str | None,
-                    path: str, filename: str, mime: str | None) -> None:
+                    path: str, filename: str, mime: str | None,
+                    metadata: dict | None = None) -> None:
     """Append a history record for one completed file.
 
     Failure to record is logged but never re-raised: a history write must not
@@ -332,11 +412,16 @@ def _record_history(job: Job, kind: str, source: str | None,
         sz = Path(path).stat().st_size
     except OSError:
         sz = None
+    metadata = metadata or {}
     try:
         history.append({
             "id": job.id,
             "kind": kind,
-            "title": job.title,
+            "title": metadata.get("title") or job.title,
+            "thumbnail": metadata.get("thumbnail", job.thumbnail),
+            "thumbnail_candidates": metadata.get("thumbnail_candidates", job.thumbnail_candidates),
+            "resolution": metadata.get("resolution", job.resolution),
+            "fps": metadata.get("fps", job.fps),
             "source": source,
             "filename": filename,
             "path": path,
@@ -350,22 +435,23 @@ def _record_history(job: Job, kind: str, source: str | None,
 def _run_single(job: Job, url: str, quality: str, kind: str = "youtube", site: str = "default"):
     _set(job, status="running", phase="starting")
     d = storage.job_dir(job.id)
+    transfer = TransferProgress()
 
     def hook(ev):
         if job.cancel_event.is_set():
             raise JobCancelled()
         st = ev.get("status")
-        if st == "downloading":
-            total = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
-            done = ev.get("downloaded_bytes", 0)
-            pct = (done / total * 99.0) if total else job.progress
-            kw = {"progress": max(job.progress, pct), "phase": "downloading"}
+        if st in ("metadata", "downloading", "finished"):
+            metrics = transfer.update(ev)
+            phase = "processing (merging)" if transfer.finished else "downloading"
+            kw = {**metrics, "progress": transfer.fraction * 99.0, "phase": phase}
+            if st == "metadata":
+                kw.update(_video_metadata(ev.get("info_dict") or {}))
+            title = (ev.get("info_dict") or {}).get("title")
             fn = ev.get("filename")
-            if fn:
-                kw["title"] = _basename(fn)
+            if title or fn:
+                kw["title"] = title or _basename(fn)
             _set(job, **kw)
-        elif st == "finished":
-            _set(job, progress=max(job.progress, 99.0), phase="processing (merging)")
 
     try:
         if job.cancel_event.is_set():
@@ -383,6 +469,7 @@ def _run_single(job: Job, url: str, quality: str, kind: str = "youtube", site: s
             result_filename=name,
             files=[(str(f), name)],
             download_url=f"/api/files/{job.id}",
+            **_completed_bytes([f]),
         )
         _record_history(job, kind, url, str(f), name, media_type(str(f)))
     except JobCancelled:
@@ -401,6 +488,7 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
     _set(job, status="running", phase="starting", total=total, current=0)
     d = storage.job_dir(job.id)
     saved: list = []  # (path, display_filename)
+    saved_metadata: dict[str, dict] = {}
 
     try:
         if job.cancel_event.is_set():
@@ -408,32 +496,36 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
         for i, url in enumerate(urls):
             if job.cancel_event.is_set():
                 raise JobCancelled()
-            _set(job, current=i, phase=f"downloading {i + 1}/{total}")
+            _set(job, current=i, phase=f"downloading {i + 1}/{total}",
+                 downloaded_bytes=0, total_bytes=None, total_bytes_estimated=False, speed=None, eta=None)
+            transfer = TransferProgress()
             base = (i / total) * 100.0 if total else 0.0
 
             def hook(ev, base=base, span=(100.0 / total if total else 100.0)):
                 if job.cancel_event.is_set():
                     raise JobCancelled()
-                if ev.get("status") == "downloading":
-                    t = ev.get("total_bytes") or ev.get("total_bytes_estimate") or 0
-                    done = ev.get("downloaded_bytes", 0)
-                    sub = (done / t) if t else 0
-                    kw = {"progress": min(99.5, base + span * sub)}
+                if ev.get("status") in ("metadata", "downloading", "finished"):
+                    metrics = transfer.update(ev)
+                    kw = {**metrics, "progress": min(99.5, base + span * transfer.fraction)}
+                    if ev.get("status") == "metadata":
+                        kw.update(_video_metadata(ev.get("info_dict") or {}))
+                    title = (ev.get("info_dict") or {}).get("title")
                     fn = ev.get("filename")
-                    if fn:
-                        kw["title"] = _basename(fn)
+                    if title or fn:
+                        kw["title"] = title or _basename(fn)
+                    if transfer.finished:
+                        kw["phase"] = "processing (merging)"
                     _set(job, **kw)
-                elif ev.get("status") == "finished":
-                    _set(job, progress=min(99.5, base + span))
 
             info, files = downloader.download_sync(url, quality, d, hook, site)
             seq = i + 1
             for f in files:
                 name = _filename(_safe_base(info.get("title"), f.stem), f.suffix, index=seq)
                 saved.append((str(f), name))
+                saved_metadata[str(f)] = {"title": info.get("title"), "source": url, **_video_metadata(info)}
 
         if zip_mode:
-            _set(job, phase="packaging zip", progress=99.5)
+            _set(job, phase="packaging zip", progress=99.5, speed=None, eta=None)
             zip_name = _filename(_safe_base(title, "playlist"), "zip")
             zip_path = d / zip_name
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -448,10 +540,15 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
                 result_filename=zip_name,
                 files=[],
                 download_url=f"/api/files/{job.id}",
+                **_completed_bytes([zip_path]),
             )
+            first = saved_metadata.get(saved[0][0], {}) if saved else {}
             _record_history(
                 job, kind, urls[0] if urls else None,
                 str(zip_path), zip_name, media_type(str(zip_path)),
+                metadata={"thumbnail": first.get("thumbnail"),
+                          "thumbnail_candidates": first.get("thumbnail_candidates", []),
+                          "resolution": None, "fps": None},
             )
         else:
             # return each file directly as mp4 (no zip)
@@ -464,10 +561,12 @@ def _run_batch(job: Job, urls: list[str], quality: str, zip_mode: bool, title: s
                 result_path=None,
                 result_filename=None,
                 download_url=None,
+                **_completed_bytes(path for path, _ in saved),
             )
             for path, name in saved:
                 _record_history(
-                    job, kind, None, path, name, media_type(path),
+                    job, kind, saved_metadata[path]["source"], path, name, media_type(path),
+                    metadata=saved_metadata[path],
                 )
     except JobCancelled:
         _set(job, status="cancelled", phase="cancelled")
@@ -497,22 +596,20 @@ def _run_http(job: Job, urls: list[str]):
         for i, url in enumerate(urls):
             if job.cancel_event.is_set():
                 raise JobCancelled()
-            _set(job, current=i, phase=f"downloading {i + 1}/{total}")
+            _set(job, current=i, phase=f"downloading {i + 1}/{total}",
+                 downloaded_bytes=0, total_bytes=None, total_bytes_estimated=False, speed=None, eta=None)
+            transfer = TransferProgress()
             base = (i / total) * 100.0 if total else 0.0
             span = (100.0 / total) if total else 100.0
 
             def hook(ev, base=base, span=span):
-                if ev.get("status") == "downloading":
-                    t = ev.get("total_bytes") or 0
-                    dn = ev.get("downloaded_bytes", 0)
-                    sub = (dn / t) if t else 0
-                    kw = {"progress": min(99.5, base + span * sub)}
+                if ev.get("status") in ("downloading", "finished"):
+                    metrics = transfer.update(ev)
+                    kw = {**metrics, "progress": min(99.5, base + span * transfer.fraction)}
                     fn = ev.get("filename")
                     if fn:
                         kw["title"] = fn
                     _set(job, **kw)
-                elif ev.get("status") == "finished":
-                    _set(job, progress=min(99.5, base + span))
 
             name, path, _size, mime = http_dl.download_sync(url, d, hook, cancel_event=job.cancel_event)
             saved.append((str(path), name))
@@ -530,6 +627,7 @@ def _run_http(job: Job, urls: list[str]):
             result_path=(saved[0][0] if len(saved) == 1 else None),
             result_filename=(saved[0][1] if len(saved) == 1 else None),
             download_url=(f"/api/files/{job.id}" if len(saved) == 1 else None),
+            **_completed_bytes(path for path, _ in saved),
         )
     except JobCancelled:
         _set(job, status="cancelled", phase="cancelled")
@@ -552,24 +650,22 @@ def _run_bt(job: Job, source: str):
     """
     _set(job, status="running", phase="connecting to swarm", total=1, current=0)
     d = storage.job_dir(job.id)
+    transfer = TransferProgress()
 
     def hook(ev):
         st = ev.get("status")
-        if st == "downloading":
-            t = ev.get("total_bytes") or 0
-            dn = ev.get("downloaded_bytes", 0)
-            sub = (dn / t) if t else 0
-            kw = {"progress": min(99.5, sub * 100.0), "phase": "downloading"}
+        if st in ("downloading", "finished"):
+            metrics = transfer.update(ev)
+            kw = {**metrics, "progress": min(99.5, transfer.fraction * 100.0),
+                  "phase": "finishing" if st == "finished" else "downloading"}
             fn = ev.get("filename")
             if fn:
                 kw["title"] = fn
             _set(job, **kw)
-        elif st == "finished":
-            _set(job, progress=99.5, phase="finishing")
         elif st == "paused":
             _set(job, status="paused", phase="paused")
         elif st == "resumed":
-            _set(job, status="running", phase="downloading")
+            _set(job, status="running", phase="downloading", speed=None, eta=None)
 
     try:
         if job.cancel_event.is_set():
@@ -591,6 +687,7 @@ def _run_bt(job: Job, source: str):
                 result_filename=name,
                 files=[(str(path), name)],
                 download_url=f"/api/files/{job.id}",
+                **_completed_bytes([path]),
             )
             _record_history(job, "bt", source, str(path), name, mime)
         else:
@@ -614,6 +711,7 @@ def _run_bt(job: Job, source: str):
                 result_path=None,
                 result_filename=None,
                 download_url=None,
+                **_completed_bytes(fp for fp, _ in saved),
             )
             for fp_str, fname in saved:
                 _record_history(job, "bt", source, fp_str, fname, media_type(fp_str))

@@ -4,6 +4,10 @@ import { fetchInfo, startBilibiliDownload, startBilibiliBatch } from './api'
 import { useLang } from './i18n'
 import { BilibiliSettings } from './BilibiliSettings'
 import { HistoryList } from './HistoryList'
+import { DownloadPanel } from './DownloadPanel'
+import { Icon } from './Icon'
+import { VideoCover } from './VideoCover'
+import { VideoDownloadActions } from './VideoDownloadActions'
 
 function fmtDuration(s: number | null): string {
   if (s == null) return ''
@@ -91,92 +95,92 @@ export function BilibiliTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
     })
   }
 
-  const qualityOptions = ['best', ...(info?.qualities || [])]
-  const QualityPicker = ({ disabled }: { disabled: boolean }) => (
-    <label>
-      {t('quality')}
-      <select value={quality} onChange={(e) => setQuality(e.target.value)} disabled={disabled}>
-        {qualityOptions.map((q) => (
-          <option key={q} value={q}>{q === 'best' ? t('best') : `${q}p`}</option>
-        ))}
-      </select>
-    </label>
-  )
 
   return (
     <>
-      <BilibiliSettings />
+      <DownloadPanel source="bilibili">
+        <BilibiliSettings />
 
-      <form className="url-form" onSubmit={onGetInfo}>
-        <input
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder={t('bilibiliUrlPlaceholder')}
-          autoFocus
-        />
-        <button type="submit" disabled={loading || !url.trim()}>
-          {loading ? t('loading') : t('getInfo')}
-        </button>
-      </form>
+        <label className="input-label" htmlFor="bilibili-url">{t('videoLink')}</label>
+        <form className="url-form" onSubmit={onGetInfo}>
+          <input
+            id="bilibili-url"
+            aria-describedby="bilibili-hint"
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={t('bilibiliUrlPlaceholder')}
+            autoFocus
+          />
+          <button type="submit" className="primary" disabled={loading || !url.trim()}>
+            {loading ? t('loading') : t('getInfo')}
+            <Icon name="arrow" size={16} />
+          </button>
+        </form>
 
-      <p className="hint">{t('bilibiliHint')}</p>
+        <p className="hint" id="bilibili-hint">{t('bilibiliHint')}</p>
 
-      {error && <div className="error">{error}</div>}
+        {error && <div className="error">{error}</div>}
 
-      {info && !info.is_playlist && (
-        <div className="card single">
-          <div className="single-head">
-            {info.thumbnail && <img src={info.thumbnail} alt="" className="thumb" referrerPolicy="no-referrer" />}
-            <div>
-              <h2>{info.title}</h2>
-              <div className="meta">{fmtDuration(info.duration)} · {t('formatsCount', { n: info.formats.length })}</div>
+        {info && !info.is_playlist && (
+          <div className="card single">
+            <div className="single-head">
+              <VideoCover src={info.thumbnail} candidates={info.thumbnail_candidates} title={info.title} />
+              <div>
+                <h2>{info.title}</h2>
+                <div className="meta">{fmtDuration(info.duration)} · {t('formatsCount', { n: info.formats.length })}</div>
+              </div>
             </div>
+            <VideoDownloadActions
+              quality={quality}
+              qualities={info.qualities}
+              formats={info.formats}
+              onQualityChange={setQuality}
+              onDownload={onDownloadSingle}
+            />
           </div>
-          <div className="actions">
-            <QualityPicker disabled={false} />
-            <button className="primary" onClick={onDownloadSingle}>
-              {t('download')}
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {info && info.is_playlist && (
-        <div className="card playlist">
-          <div className="playlist-head">
-            <div>
-              <h2>{info.title}</h2>
-              <div className="meta">{t('videos', { n: info.entries.length })}</div>
+        {info && info.is_playlist && (
+          <div className="card playlist">
+            <div className="playlist-head">
+              <div className="playlist-summary">
+                <VideoCover src={info.thumbnail} candidates={info.thumbnail_candidates} title={info.title} />
+                <div>
+                  <h2>{info.title}</h2>
+                  <div className="meta">{t('videos', { n: info.entries.length })}</div>
+                </div>
+              </div>
+              <button className="link" onClick={toggleAll}>
+                {selected.size === info.entries.length ? t('clearAll') : t('selectAll')}
+              </button>
             </div>
-            <button className="link" onClick={toggleAll}>
-              {selected.size === info.entries.length ? t('clearAll') : t('selectAll')}
-            </button>
+            <ul className="entries">
+              {info.entries.map((en, i) => (
+                <li key={i}>
+                  <label>
+                    <input type="checkbox" checked={selected.has(i)} onChange={() => toggleEntry(i)} />
+                    <span className="entry-title">{en.title || en.id || t('videoN', { n: i + 1 })}</span>
+                    <span className="entry-dur">{fmtDuration(en.duration)}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <VideoDownloadActions
+              quality={quality}
+              qualities={info.qualities}
+              formats={info.formats}
+              onQualityChange={setQuality}
+              onDownload={onDownloadBatch}
+              selectedCount={selected.size}
+              totalCount={info.entries.length}
+              zip={zip}
+              onZipChange={setZip}
+            />
           </div>
-          <ul className="entries">
-            {info.entries.map((en, i) => (
-              <li key={i}>
-                <label>
-                  <input type="checkbox" checked={selected.has(i)} onChange={() => toggleEntry(i)} />
-                  <span className="entry-title">{en.title || en.id || t('videoN', { n: i + 1 })}</span>
-                  <span className="entry-dur">{fmtDuration(en.duration)}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <div className="actions">
-            <QualityPicker disabled={false} />
-            <label className="zip-check">
-              <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} />
-              {t('zipLabel')}
-            </label>
-            <button className="primary" onClick={onDownloadBatch}>
-              {selected.size > 0 ? t('downloadN', { n: selected.size }) : t('download')}
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
+      </DownloadPanel>
       <HistoryList kind="bilibili" activeJobs={activeJobs} refreshKey={refreshKey} />
     </>
   )

@@ -75,7 +75,7 @@ pip install -r requirements.txt
 pip install --pre -U yt-dlp          # nightly
 uvicorn app.main:app --reload --port 8000
 
-# 系统依赖：ffmpeg、node >= 22（用于 yt-dlp-ejs / JS 挑战）
+# 系统依赖：ffmpeg、aria2、node >= 22（用于 yt-dlp-ejs / JS 挑战）
 
 # 前端（另开一个终端）
 cd frontend
@@ -89,6 +89,17 @@ npm run dev      # http://localhost:5173（/api 代理到 :8000）
 cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / 提供
 ```
 
+运行前端浏览器回归测试（需要 Node.js 20+，无需启动后端）：
+
+```bash
+cd frontend
+npm ci
+npx playwright install --with-deps chromium --only-shell
+npm test
+```
+
+测试会构建生产版本，并使用隔离的模拟 API 响应。
+
 ## 配置
 
 大部分下载相关设置（cookies、代理）在各标签页的设置区块中在线编辑，
@@ -101,6 +112,7 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | `DOWNLOAD_DIR` | `$DATA_DIR/downloads` | 下载文件存放位置 |
 | `TTL_MINUTES` | `60` | 超过此时间的文件会被删除 |
 | `MAX_CONCURRENT` | `3` | 并发下载工作线程数 |
+| `VIDEO_CONNECTIONS` | `8` | 每个视频的连接数 / HLS-DASH 并发分片数（1–16，设为 1 关闭并行下载） |
 | `YTDLP_COOKIEFILE` | _(无)_ | `cookies.txt` 的兜底路径（UI 优先） |
 | `YTDLP_PROXY` | _(无)_ | 兜底 HTTP/SOCKS 代理（UI 优先） |
 | `YTDLP_IMPERSONATE` | _(无)_ | 浏览器 TLS 伪装目标（如 `chrome`） |
@@ -112,9 +124,10 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 
 | 方法 | 路径 | 请求体 | 返回 |
 |---|---|---|---|
-| POST | `/api/info` | `{url}` | 视频格式列表或播放列表条目 |
+| POST | `/api/info` | `{url, page?, page_size?}` | 视频格式、播放列表或频道分页条目 |
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
+| POST | `/api/download-queue` | `{entries: [{url, title?}], quality?, skip_downloaded?}` | `{jobs[], skipped_downloaded, skipped_active}` |
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}`（HTTP 中继下载） |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}`（BitTorrent 磁力链） |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}`（BitTorrent 种子文件） |
@@ -123,6 +136,8 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | GET | `/api/files/{id}` | - | 下载的文件或 zip |
 | GET | `/api/files/{id}/{index}` | - | 多文件任务中的单个文件 |
 | GET | `/api/history` | - | 历史下载及文件是否仍在磁盘上 |
+| GET/HEAD | `/api/history/files/{key}` | - | 按历史记录取回文件，支持服务器重启后的文件 |
+| POST | `/api/history/batch-delete` | `{keys: [record_key], delete_files?: false}` | `{removed[], missing[], failed: [{key, reason}]}`，每次 1–100 个标识 |
 | GET | `/api/settings` | - | 当前设置（不含 cookie 内容） |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | 更新后的设置 |
 | PUT | `/api/settings/cookies` | 原始 `cookies.txt` 文本 | `{cookies_configured}` |
@@ -132,7 +147,21 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 
 `quality` 为 `"best"`（默认）或形如 `"1080"` 的分辨率高度。
 
+历史条目包含逐记录的 `key`，可用文件还带有 `download_url`。精确取回和删除文件时
+使用这些字段；`id` 仍为下载任务标识，多个文件可能共用同一个 `id`。
+
 ## 功能特性
+
+- **YouTube 频道**：支持 `@频道/videos`、频道主页及 Shorts/直播列表。每页加载
+  20 条，按需勾选，翻页保留选择，每批最多加入 100 个独立任务。默认跳过本地
+  文件仍可用的已下载视频，始终跳过进行中的重复任务；一个视频失败不影响其他
+  任务。沿用 `MAX_CONCURRENT` 并发限制（默认 3）。
+
+- **视频多连接下载**：HTTP 视频/音频流通过 aria2 建立最多 `VIDEO_CONNECTIONS`
+  个分段连接；HLS/DASH 使用原生并发分片下载。支持实时进度和取消，无法使用时
+  回退到原生下载器。SOCKS 代理和浏览器 TLS 伪装使用原生下载。Docker 已包含
+  aria2，本地开发需安装系统包 `aria2`。实际连接数和速度受服务器、文件大小影响；
+  `MAX_CONCURRENT` 另行控制同时运行的任务数。
 
 - **标签页** - **视频** 页（粘贴视频/播放列表链接，选择清晰度，下载；
   Cookie/代理在页面内配置并自动检测）、**HTTP** 页（粘贴一条或多条
@@ -147,9 +176,11 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
   `-p 6881:6881/tcp -p 6881:6881/udp`。
 - **预览** - 完成的视频/音频下载可直接在页面内播放（HTTP 页还支持图片），
   无需重新下载。
-- **历史记录** - 每个完成的下载都会记录到 `<DATA_DIR>/history.jsonl` 并
-  显示在历史面板中；仍在磁盘上的文件可重新预览/下载，已过期的会置灰显示。
-  历史记录在重启后保留。
+- **历史记录** - 已完成文件记录到 `<DATA_DIR>/history.jsonl`，按来源显示。
+  支持多选、本页全选、批量取回可用文件和批量删除记录。删除前需确认，默认保留
+  本地文件，也可勾选只删除所选记录的文件。批量取回跳过失效文件，翻页或切换来源
+  清空选择。历史记录及文件取回支持服务器重启；正在下载的任务单独管理。
+  浏览器可能需要允许下载多个文件。
 - **主题** - 深色 / 浅色 / **跟随系统**（跟随系统偏好并实时切换）；
   语言切换 中文 / English。选择会被记住。
 

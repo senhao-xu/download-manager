@@ -154,8 +154,8 @@ def download_sync(source: str, dest_dir: Path, progress_hook, cancel_event=None,
         torrent_name = info.name() if info is not None else dest_dir.name
         total = int(status.total_wanted) if status.total_wanted else 0
 
-        # Download loop: emit progress on real byte movement only (avoid flooding
-        # the SSE channel while stalled waiting for peers).
+        # Poll transfer telemetry every 500ms, including a zero rate while
+        # waiting for peers. Deadlines below follow real byte movement.
         #
         # Two deadlines guard against a torrent that never makes progress, so a
         # dead swarm can't occupy the (single) BT worker forever:
@@ -197,19 +197,22 @@ def download_sync(source: str, dest_dir: Path, progress_hook, cancel_event=None,
 
             s = handle.status()
             done = int(s.total_wanted_done)
+            # Update telemetry even while waiting for peers, so stale rates
+            # drop to zero. The stall deadline still follows byte movement.
             if done != prev_done:
                 if done > 0:
                     # Any new bytes: this is the first-data check satisfied and
                     # the stall timer refreshed.
                     saw_data = True
                     stall_deadline = time.monotonic() + cfg.bt_stall_timeout
-                progress_hook({
-                    "status": "downloading",
-                    "downloaded_bytes": done,
-                    "total_bytes": int(s.total_wanted) or total,
-                    "filename": torrent_name,
-                })
                 prev_done = done
+            progress_hook({
+                "status": "downloading",
+                "downloaded_bytes": done,
+                "total_bytes": int(s.total_wanted) or total,
+                "filename": torrent_name,
+                "speed": max(0, int(s.download_payload_rate)),
+            })
             now = time.monotonic()
             if not saw_data and now > first_data_deadline:
                 raise RuntimeError(
@@ -224,7 +227,9 @@ def download_sync(source: str, dest_dir: Path, progress_hook, cancel_event=None,
                 )
             ses.wait_for_alert(_POLL_MS)
 
-        progress_hook({"status": "finished"})
+        final = handle.status()
+        progress_hook({"status": "finished", "downloaded_bytes": int(final.total_wanted_done),
+                       "total_bytes": int(final.total_wanted) or total, "filename": torrent_name})
 
         files = _file_list(handle, dest_dir)
         if not files:
