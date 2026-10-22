@@ -94,6 +94,17 @@ Build the frontend for the backend to serve:
 cd frontend && npm run build      # outputs frontend/dist/, served by backend at /
 ```
 
+Run the frontend browser regressions (Node.js 20+, no backend required):
+
+```bash
+cd frontend
+npm ci
+npx playwright install --with-deps chromium --only-shell
+npm test
+```
+
+The tests build the production bundle and use isolated, mocked API responses.
+
 ## Configuration
 
 Most download settings (cookies, proxy) are edited inline in each tab's Settings

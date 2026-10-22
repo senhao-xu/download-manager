@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { JobStatus, OwnerTab } from './types'
 import { getJob, listActiveJobs } from './api'
 import { triggerDownload } from './JobView'
+import { useLang } from './i18n'
 
 /**
  * Multi-job store, instantiated ONCE at the App level.
@@ -29,6 +30,7 @@ import { triggerDownload } from './JobView'
 const MAX_RECONNECT_ATTEMPTS = 6
 
 export function useJobs() {
+  const { t } = useLang()
   const [jobs, setJobs] = useState<Map<string, JobStatus>>(new Map())
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0)
 
@@ -102,14 +104,35 @@ export function useJobs() {
       }
     }
     if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
-      queuedRef.current.delete(j.id)
-      esRef.current.get(j.id)?.close()
-      esRef.current.delete(j.id)
-      if (!terminalRef.current.has(j.id)) {
-        terminalRef.current.add(j.id)
-        onTerminal(j.id, j.status)
-      }
+      finishJob(j.id, j.status)
     }
+  }
+
+  function finishJob(jobId: string, status: JobStatus['status']) {
+    queuedRef.current.delete(jobId)
+    esRef.current.get(jobId)?.close()
+    esRef.current.delete(jobId)
+    if (!terminalRef.current.has(jobId)) {
+      terminalRef.current.add(jobId)
+      onTerminal(jobId, status)
+    }
+  }
+
+  function markJobLost(jobId: string) {
+    // Invalidate pending callbacks and retain the last known title/kind so the
+    // failure remains visible in its source tab after a server restart.
+    genRef.current.set(jobId, genOf(jobId) + 1)
+    setJobs(previous => {
+      const job = previous.get(jobId)
+      if (!job) return previous
+      const next = new Map(previous)
+      next.set(jobId, {
+        ...job, status: 'error', phase: 'error', error: t('jobLost'),
+        speed: null, eta: null, download_url: null, download_urls: [],
+      })
+      return next
+    })
+    finishJob(jobId, 'error')
   }
 
   function genOf(jobId: string): number {
@@ -132,16 +155,22 @@ export function useJobs() {
 
   async function pollQueue() {
     queueTimerRef.current = null
-    if (!mountedRef.current || pollingRef.current) return
+    if (!mountedRef.current || pollingRef.current || !queuedRef.current.size) return
     pollingRef.current = true
     const waiting = [...queuedRef.current]
     try {
       const active = new Map((await listActiveJobs()).map(job => [job.id, job]))
-      await Promise.all(waiting.map(async ([id, gen]) => {
+      // Settle each lookup independently, including transient errors, before
+      // starting another poll so one failed request cannot overlap the others.
+      await Promise.allSettled(waiting.map(async ([id, gen]) => {
         if (!mountedRef.current || genOf(id) !== gen || !queuedRef.current.has(id)) return
         // A short job may finish between polls and disappear from the active list.
         const job = active.get(id) ?? await getJob(id)
         if (!mountedRef.current || genOf(id) !== gen || !queuedRef.current.has(id)) return
+        if (job === null) {
+          markJobLost(id)
+          return
+        }
         applyJob(job)
         if (job.status === 'running' || job.status === 'paused') {
           queuedRef.current.delete(id)
@@ -162,6 +191,10 @@ export function useJobs() {
     getJob(jobId)
       .then((j) => {
         if (!mountedRef.current || genOf(jobId) !== gen) return
+        if (j === null) {
+          markJobLost(jobId)
+          return
+        }
         if (j.status === 'queued') {
           applyJob(j)
           watchQueued(jobId, gen)
@@ -214,7 +247,8 @@ export function useJobs() {
   /** On a job going terminal: refresh history now, auto-dismiss the row shortly. */
   function onTerminal(jobId: string, status: string) {
     setHistoryRefreshTick((n) => n + 1)
-    // Failed videos have no history record; keep their reason visible.
+    // Keep failures visible; a partially failed HTTP batch can still have files
+    // in history, which HistoryList displays alongside the error.
     if (status === 'error') return
     // Give HistoryList time to refetch and show the completed row, then drop the
     // active row (dedup hides the history copy meanwhile, so no flicker).

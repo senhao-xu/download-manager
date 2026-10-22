@@ -89,6 +89,17 @@ npm run dev      # http://localhost:5173（/api 代理到 :8000）
 cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / 提供
 ```
 
+运行前端浏览器回归测试（需要 Node.js 20+，无需启动后端）：
+
+```bash
+cd frontend
+npm ci
+npx playwright install --with-deps chromium --only-shell
+npm test
+```
+
+测试会构建生产版本，并使用隔离的模拟 API 响应。
+
 ## 配置
 
 大部分下载相关设置（cookies、代理）在各标签页的设置区块中在线编辑，

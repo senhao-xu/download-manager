@@ -119,9 +119,9 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
     return () => { cancelled = true }
   }, [kind, page, view])
 
-  // Hide history rows whose job is still shown as an active row (covers the
-  // brief window where a finished job is still pinned on top before dismiss).
-  const activeIds = new Set(activeJobs.map((j) => j.id))
+  // Deduplicate active and briefly pinned completed jobs. An error stays visible
+  // but must not hide files that succeeded earlier in the same HTTP batch.
+  const activeIds = new Set(activeJobs.filter((j) => j.status !== 'error').map((j) => j.id))
   const historyItems = (current ? data.items : []).filter((it) => !activeIds.has(it.id))
   const selectedItems = historyItems.filter(item => selected.has(item.key))
   const downloadUrls = selectedItems.flatMap(item => item.available && item.download_url ? [item.download_url] : [])

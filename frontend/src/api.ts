@@ -64,9 +64,10 @@ export async function startHttpDownload(urls: string[]): Promise<string> {
   return j.job_id as string
 }
 
-/** Fetch the current snapshot of a job (SSE reconciliation / reconnect). */
-export async function getJob(jobId: string): Promise<JobStatus> {
+/** Fetch a job snapshot; null means the server no longer knows this job. */
+export async function getJob(jobId: string): Promise<JobStatus | null> {
   const r = await fetch(`/api/jobs/${jobId}`)
+  if (r.status === 404) return null
   if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
