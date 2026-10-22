@@ -103,6 +103,8 @@ export interface CookieCheckResult {
 
 export interface HistoryEntry {
   id: string
+  key: string
+  download_url: string | null
   kind: string // "youtube" | "http" | "bt" | "bilibili"
   title: string | null
   thumbnail?: string | null
@@ -122,4 +124,10 @@ export interface HistoryList {
   total: number
   page: number
   page_size: number
+}
+
+export interface HistoryBatchDeleteResult {
+  removed: string[]
+  missing: string[]
+  failed: { key: string; reason: 'active_job' | 'shared_file' | 'invalid_path' | 'delete_failed' }[]
 }

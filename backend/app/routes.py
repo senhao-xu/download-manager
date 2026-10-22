@@ -17,6 +17,8 @@ from .schemas import (
     BtMagnetRequest,
     CookieCheckResult,
     DownloadRequest,
+    HistoryBatchDeleteRequest,
+    HistoryBatchDeleteResult,
     HistoryEntry,
     HistoryList,
     HttpDownloadRequest,
@@ -311,13 +313,18 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
     recs, total = history.list_page(kind=kind, page=page, page_size=page_size)
     items: list[HistoryEntry] = []
     for rec in recs:
-        path = rec.get("path")
-        available = bool(path) and Path(path).exists()
+        key = history.record_key(rec)
+        try:
+            available = history.record_path(rec).is_file()
+        except (OSError, ValueError, RuntimeError):
+            available = False
         covers = downloader.thumbnail_candidates(rec)
         if not covers and rec.get("kind") == "youtube":
             covers = thumbnails.source_candidates(rec.get("source"))
         items.append(HistoryEntry(
             id=rec.get("id", ""),
+            key=key,
+            download_url=f"/api/history/files/{key}" if available else None,
             kind=rec.get("kind", ""),
             title=rec.get("title"),
             thumbnail=covers[0] if covers else None,
@@ -332,6 +339,25 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
             available=available,
         ))
     return HistoryList(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.api_route("/history/files/{key}", methods=["GET", "HEAD"])
+def get_history_file(key: str):
+    record = history.find_by_key(key)
+    if record is not None:
+        try:
+            path = history.record_path(record)
+            if path.is_file():
+                return FileResponse(path, media_type=media_type(str(path)),
+                                    filename=record.get("filename") or path.name)
+        except (OSError, ValueError, RuntimeError):
+            pass
+    raise HTTPException(status_code=404, detail="History file not available.")
+
+
+@router.post("/history/batch-delete", response_model=HistoryBatchDeleteResult)
+def delete_history_batch(req: HistoryBatchDeleteRequest):
+    return history.delete_by_keys(req.keys, req.delete_files, is_active=jobs.is_running)
 
 
 @router.delete("/history/{job_id}")

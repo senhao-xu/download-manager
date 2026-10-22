@@ -125,6 +125,8 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | GET | `/api/files/{id}` | - | 下载的文件或 zip |
 | GET | `/api/files/{id}/{index}` | - | 多文件任务中的单个文件 |
 | GET | `/api/history` | - | 历史下载及文件是否仍在磁盘上 |
+| GET/HEAD | `/api/history/files/{key}` | - | 按历史记录取回文件，支持服务器重启后的文件 |
+| POST | `/api/history/batch-delete` | `{keys: [record_key], delete_files?: false}` | `{removed[], missing[], failed: [{key, reason}]}`，每次 1–100 个标识 |
 | GET | `/api/settings` | - | 当前设置（不含 cookie 内容） |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | 更新后的设置 |
 | PUT | `/api/settings/cookies` | 原始 `cookies.txt` 文本 | `{cookies_configured}` |
@@ -133,6 +135,9 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | POST | `/api/settings/check-cookies` | `{url}` | `{state, title, detail}` Cookie 可用性检测 |
 
 `quality` 为 `"best"`（默认）或形如 `"1080"` 的分辨率高度。
+
+历史条目包含逐记录的 `key`，可用文件还带有 `download_url`。精确取回和删除文件时
+使用这些字段；`id` 仍为下载任务标识，多个文件可能共用同一个 `id`。
 
 ## 功能特性
 
@@ -160,9 +165,11 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
   `-p 6881:6881/tcp -p 6881:6881/udp`。
 - **预览** - 完成的视频/音频下载可直接在页面内播放（HTTP 页还支持图片），
   无需重新下载。
-- **历史记录** - 每个完成的下载都会记录到 `<DATA_DIR>/history.jsonl` 并
-  显示在历史面板中；仍在磁盘上的文件可重新预览/下载，已过期的会置灰显示。
-  历史记录在重启后保留。
+- **历史记录** - 已完成文件记录到 `<DATA_DIR>/history.jsonl`，按来源显示。
+  支持多选、本页全选、批量取回可用文件和批量删除记录。删除前需确认，默认保留
+  本地文件，也可勾选只删除所选记录的文件。批量取回跳过失效文件，翻页或切换来源
+  清空选择。历史记录及文件取回支持服务器重启；正在下载的任务单独管理。
+  浏览器可能需要允许下载多个文件。
 - **主题** - 深色 / 浅色 / **跟随系统**（跟随系统偏好并实时切换）；
   语言切换 中文 / English。选择会被记住。
 

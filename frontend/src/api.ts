@@ -1,4 +1,4 @@
-import type { CookieCheckResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult, VideoQueueResponse } from './types'
+import type { CookieCheckResult, HistoryBatchDeleteResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult, VideoQueueResponse } from './types'
 
 async function postJSON(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
@@ -179,6 +179,12 @@ export async function getHistory(kind?: string, page: number = 1, pageSize: numb
   params.set('page_size', String(pageSize))
   const r = await fetch(`/api/history?${params.toString()}`)
   if (!r.ok) throw new Error('Failed to load history')
+  return r.json()
+}
+
+export async function deleteHistoryBatch(keys: string[], deleteFiles: boolean = false): Promise<HistoryBatchDeleteResult> {
+  const r = await postJSON('/api/history/batch-delete', { keys, delete_files: deleteFiles })
+  if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }
 

@@ -1,4 +1,6 @@
 """Pydantic request/response schemas (API contracts)."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -153,6 +155,8 @@ class CookieCheckResult(BaseModel):
 
 class HistoryEntry(BaseModel):
     id: str
+    key: str = ""
+    download_url: str | None = None
     kind: str  # "youtube" | "http"
     title: str | None = None
     thumbnail: str | None = None
@@ -172,4 +176,20 @@ class HistoryList(BaseModel):
     total: int = 0
     page: int = 1
     page_size: int = 10
+
+
+class HistoryBatchDeleteRequest(BaseModel):
+    keys: list[str] = Field(min_length=1, max_length=100)
+    delete_files: bool = False
+
+
+class HistoryDeleteFailure(BaseModel):
+    key: str
+    reason: Literal["active_job", "shared_file", "invalid_path", "delete_failed"]
+
+
+class HistoryBatchDeleteResult(BaseModel):
+    removed: list[str]
+    missing: list[str]
+    failed: list[HistoryDeleteFailure]
 

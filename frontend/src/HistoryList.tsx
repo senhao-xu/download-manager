@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLang } from './i18n'
-import { getHistory, deleteHistory } from './api'
+import { getHistory, deleteHistoryBatch } from './api'
 import type { HistoryEntry, JobStatus, OwnerTab } from './types'
-import { triggerDownload } from './JobView'
-import { JobView } from './JobView'
+import { downloadAll, JobView, triggerDownload } from './JobView'
 import { Icon } from './Icon'
 import { formatBytes, formatVideoDetails } from './format'
 import { VideoCover } from './VideoCover'
@@ -67,67 +66,140 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
   activeJobs: JobStatus[]
   refreshKey: number
 }) {
+  return <HistoryForKind key={kind} kind={kind} activeJobs={activeJobs} refreshKey={refreshKey} />
+}
+
+function HistoryForKind({ kind, activeJobs, refreshKey }: {
+  kind: OwnerTab
+  activeJobs: JobStatus[]
+  refreshKey: number
+}) {
   const { t, lang } = useLang()
-  const [items, setItems] = useState<HistoryEntry[] | null>(null)
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [reload, setReload] = useState(0)
+  const [data, setData] = useState<{ view: string; items: HistoryEntry[]; total: number } | null>(null)
+  const [failedView, setFailedView] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
-  // id of the row whose delete confirm is open; null = none.
-  const [deleting, setDeleting] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  // Snapshot the precise records when confirmation opens.
+  const [deleting, setDeleting] = useState<HistoryEntry[] | null>(null)
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [busy, setBusy] = useState(false)
+  const submitting = useRef(false)
+  const mounted = useRef(true)
+  const view = `${page}:${refreshKey}:${reload}`
+  const current = data?.view === view
+  const loading = !current && failedView !== view
+  const total = data?.total ?? 0
 
-  // Re-fetch when the page, kind, or the store's refreshKey changes. refreshKey
-  // bumps when a job finishes, surfacing the new history entry.
-  function fetchPage() {
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
-    setError(null)
     getHistory(kind, page, PAGE_SIZE)
       .then((r) => {
         if (cancelled) return
-        setItems(r.items)
-        setTotal(r.total)
-        // If the current page ran past the last page (e.g. after deletions),
-        // snap back to the last valid page.
         const lastPage = Math.max(1, Math.ceil(r.total / PAGE_SIZE))
-        if (page > lastPage) setPage(lastPage)
+        if (page > lastPage) {
+          setSelected(new Set())
+          setDeleting(null)
+          setPage(lastPage)
+          return
+        }
+        setData({ view, items: r.items, total: r.total })
+        setFailedView(null)
+        const keys = new Set(r.items.map(item => item.key))
+        setSelected(previous => new Set([...previous].filter(key => keys.has(key))))
       })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t('fetchFailed')) })
+      .catch(() => { if (!cancelled) setFailedView(view) })
     return () => { cancelled = true }
-  }
-
-  useEffect(fetchPage, [kind, page, refreshKey, t])
+  }, [kind, page, view])
 
   // Hide history rows whose job is still shown as an active row (covers the
   // brief window where a finished job is still pinned on top before dismiss).
   const activeIds = new Set(activeJobs.map((j) => j.id))
-  const historyItems = (items ?? []).filter((it) => !activeIds.has(it.id))
+  const historyItems = (current ? data.items : []).filter((it) => !activeIds.has(it.id))
+  const selectedItems = historyItems.filter(item => selected.has(item.key))
+  const downloadUrls = selectedItems.flatMap(item => item.available && item.download_url ? [item.download_url] : [])
+  const allSelected = historyItems.length > 0 && selectedItems.length === historyItems.length
+  const locked = busy || deleting !== null || !current
+
+  // Live-job deduplication and refreshes must not leave hidden selections.
+  const visibleKeys = historyItems.map(item => item.key).join(',')
+  useEffect(() => {
+    if (!current) return
+    const keys = new Set(visibleKeys.split(','))
+    setSelected(previous => {
+      const next = new Set([...previous].filter(key => keys.has(key)))
+      return next.size === previous.size ? previous : next
+    })
+    setDeleting(previous => previous?.some(item => !keys.has(item.key)) ? null : previous)
+  }, [current, visibleKeys])
 
   function kindLabel(k: string): string {
     return k === 'http' ? t('kindHttp') : k === 'bt' ? t('kindBt') : k === 'bilibili' ? t('kindBilibili') : t('kindYoutube')
   }
 
-  async function confirmDelete(id: string) {
+  async function confirmDelete() {
+    if (!deleting || submitting.current) return
+    submitting.current = true
     setBusy(true)
     setError(null)
+    setMessage(null)
     try {
-      await deleteHistory(id, deleteFiles)
+      const result = await deleteHistoryBatch(deleting.map(item => item.key), deleteFiles)
+      if (!mounted.current) return
+      const finished = new Set([...result.removed, ...result.missing])
+      setSelected(previous => new Set([...previous].filter(key => !finished.has(key))))
+      if (result.failed.length) {
+        const names = new Map(deleting.map(item => [item.key, item.title || item.filename || item.id]))
+        setSelected(new Set(result.failed.map(item => item.key)))
+        setError(`${t('historyDeletePartial', { n: result.failed.length })} ${result.failed.map(item =>
+          `${names.get(item.key) ?? item.key}: ${t(`historyDelete_${item.reason}`)}`).join('; ')}`)
+      }
+      if (finished.size) setMessage(t('historyDeleted', { n: finished.size }))
       setDeleting(null)
       setDeleteFiles(false)
-      // Force a refresh of the current view.
-      const lastPage = Math.max(1, Math.ceil(Math.max(0, total - 1) / PAGE_SIZE))
-      if (page > lastPage) setPage(lastPage)
-      else fetchPage()
+      setReload(value => value + 1)
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('deleteFailed'))
+      if (mounted.current) setError(e instanceof Error ? e.message : t('deleteFailed'))
     } finally {
-      setBusy(false)
+      submitting.current = false
+      if (mounted.current) setBusy(false)
     }
+  }
+
+  function openDelete(records: HistoryEntry[]) {
+    if (locked || !records.length) return
+    setDeleting(records)
+    setDeleteFiles(false)
+    setError(null)
+    setMessage(null)
   }
 
   function cancelDelete() {
     setDeleting(null)
     setDeleteFiles(false)
+  }
+
+  function changePage(next: number) {
+    setSelected(new Set())
+    cancelDelete()
+    setError(null)
+    setMessage(null)
+    setPage(next)
+  }
+
+  function toggle(key: string) {
+    setSelected(previous => {
+      const next = new Set(previous)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
   }
 
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -151,11 +223,17 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
         </ul>
       )}
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      {message && <p className="history-notice" role="status">{message}</p>}
+      {failedView === view && (
+        <div className="error" role="alert">
+          {t('fetchFailed')} <button onClick={() => setReload(value => value + 1)}>{t('historyRetry')}</button>
+        </div>
+      )}
 
-      {!error && !items && <p className="history-loading" role="status">{t('loading')}</p>}
+      {loading && <p className="history-loading" role="status">{t('loading')}</p>}
 
-      {!error && items && !hasActive && historyItems.length === 0 && (
+      {current && !hasActive && historyItems.length === 0 && (
         <div className="history-empty">
           <span className="empty-icon"><Icon name="download" size={27} /></span>
           <h4>{t('noHistory')}</h4>
@@ -165,13 +243,49 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
 
       {historyItems.length > 0 && (
         <>
+          <div className="history-batch-toolbar" role="group" aria-label={t('historyBatchActions')}>
+            <label className="history-check">
+              <input type="checkbox" checked={allSelected} disabled={locked}
+                ref={node => { if (node) node.indeterminate = selectedItems.length > 0 && !allSelected }}
+                onChange={() => setSelected(allSelected ? new Set() : new Set(historyItems.map(item => item.key)))} />
+              {t('selectPage')}
+            </label>
+            <span className="history-selection-count" role="status">{t('selectedCount', { n: selectedItems.length, total: historyItems.length })}</span>
+            {selectedItems.length > 0 && <button className="link" disabled={locked} onClick={() => setSelected(new Set())}>{t('clearSelection')}</button>}
+            <div className="history-batch-actions">
+              <button disabled={locked || !downloadUrls.length} onClick={() => {
+                downloadAll(downloadUrls)
+                setMessage(t('historyDownloading', { n: downloadUrls.length, skipped: selectedItems.length - downloadUrls.length }))
+              }}>{DownloadIcon} {t('downloadSelected')}</button>
+              <button className="danger" disabled={locked || !selectedItems.length} onClick={() => openDelete(selectedItems)}>
+                {TrashIcon} {t('historyDeleteSelected')}
+              </button>
+            </div>
+          </div>
+          {deleting && (
+            <div className="history-delete-confirm" role="group" aria-label={t('historyDeleteConfirm', { n: deleting.length })}>
+              <p>{t('historyDeleteConfirm', { n: deleting.length })}</p>
+              <label className="zip-check">
+                <input type="checkbox" checked={deleteFiles} onChange={event => setDeleteFiles(event.target.checked)} disabled={busy} />
+                {t('deleteFilesToo')}
+              </label>
+              <button className="danger" onClick={() => void confirmDelete()} disabled={busy || !current}>
+                {busy ? t('deleting') : t('confirmDelete')}
+              </button>
+              <button className="link" onClick={cancelDelete} disabled={busy}>{t('cancel')}</button>
+            </div>
+          )}
           <ul className="history-list">
             {historyItems.map((it) => {
-              const src = `/api/files/${it.id}`
               const hasCover = !!(it.thumbnail || it.thumbnail_candidates?.length)
               const videoDetails = formatVideoDetails(it.resolution, it.fps)
               return (
-                <li key={it.id} className={`history-row${hasCover ? ' has-cover' : ''}${it.available ? '' : ' expired'}`}>
+                <li key={it.key} className={`history-row${hasCover ? ' has-cover' : ''}${it.available ? '' : ' expired'}${selected.has(it.key) ? ' selected' : ''}`}>
+                  <label className="history-check history-row-check">
+                    <input type="checkbox" checked={selected.has(it.key)} disabled={locked}
+                      aria-label={t('historySelectRecord', { title: it.title || it.filename || it.id })}
+                      onChange={() => toggle(it.key)} />
+                  </label>
                   {hasCover
                     ? <VideoCover src={it.thumbnail ?? null} candidates={it.thumbnail_candidates} title={it.title} />
                     : <span className="history-file-icon"><Icon name="file" size={21} /></span>}
@@ -187,60 +301,38 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
                       {it.size != null && <span className="history-size">{formatBytes(it.size)}</span>}
                       {it.source && <span className="history-source" title={it.source}>{it.source}</span>}
                     </div>
-                    {deleting === it.id && (
-                      <div className="history-delete-confirm">
-                        <label className="zip-check">
-                          <input
-                            type="checkbox"
-                            checked={deleteFiles}
-                            onChange={(e) => setDeleteFiles(e.target.checked)}
-                            disabled={busy}
-                          />
-                          {t('deleteFilesToo')}
-                        </label>
-                        <button className="danger" onClick={() => confirmDelete(it.id)} disabled={busy}>
-                          {busy ? t('deleting') : t('confirmDelete')}
-                        </button>
-                        <button className="link" onClick={cancelDelete} disabled={busy}>
-                          {t('cancel')}
-                        </button>
-                      </div>
-                    )}
                   </div>
                   <div className="history-actions">
                     <button
-                      onClick={() => triggerDownload(src)}
-                      disabled={!it.available}
+                      onClick={() => { if (it.download_url) triggerDownload(it.download_url) }}
+                      disabled={locked || !it.available || !it.download_url}
                     >
                       {DownloadIcon} {t('reDownload')}
                     </button>
-                    {deleting !== it.id && (
-                      <button
-                        className="danger"
-                        onClick={() => { setDeleting(it.id); setDeleteFiles(false) }}
-                        disabled={busy}
-                      >
-                        {TrashIcon} {t('delete')}
-                      </button>
-                    )}
+                    <button
+                      className="danger"
+                      onClick={() => openDelete([it])}
+                      disabled={locked}
+                    >
+                      {TrashIcon} {t('delete')}
+                    </button>
                   </div>
                 </li>
               )
             })}
           </ul>
-
-          {lastPage > 1 && (
-            <div className="history-pager">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                {ArrowLeft} {t('prevPage')}
-              </button>
-              <span className="pager-info">{t('page', { n: page, total: lastPage })}</span>
-              <button onClick={() => setPage((p) => Math.min(lastPage, p + 1))} disabled={page >= lastPage}>
-                {t('nextPage')} {ArrowRight}
-              </button>
-            </div>
-          )}
         </>
+      )}
+      {current && lastPage > 1 && (
+        <nav className="history-pager" aria-label={t('historyPagination')}>
+          <button onClick={() => changePage(Math.max(1, page - 1))} disabled={locked || page <= 1}>
+            {ArrowLeft} {t('prevPage')}
+          </button>
+          <span className="pager-info">{t('page', { n: page, total: lastPage })}</span>
+          <button onClick={() => changePage(Math.min(lastPage, page + 1))} disabled={locked || page >= lastPage}>
+            {t('nextPage')} {ArrowRight}
+          </button>
+        </nav>
       )}
     </div>
   )
