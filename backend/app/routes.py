@@ -314,8 +314,12 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
     items: list[HistoryEntry] = []
     for rec in recs:
         key = history.record_key(rec)
+        file_mime = None
         try:
-            available = history.record_path(rec).is_file()
+            path = history.record_path(rec)
+            available = path.is_file()
+            if available:
+                file_mime = media_type(str(path))
         except (OSError, ValueError, RuntimeError):
             available = False
         covers = downloader.thumbnail_candidates(rec)
@@ -325,6 +329,8 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
             id=rec.get("id", ""),
             key=key,
             download_url=f"/api/history/files/{key}" if available else None,
+            stream_url=(f"/api/history/files/{key}?inline=true"
+                        if file_mime and file_mime.startswith("video/") else None),
             kind=rec.get("kind", ""),
             title=rec.get("title"),
             thumbnail=covers[0] if covers else None,
@@ -342,14 +348,20 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
 
 
 @router.api_route("/history/files/{key}", methods=["GET", "HEAD"])
-def get_history_file(key: str):
+def get_history_file(key: str, inline: bool = False):
     record = history.find_by_key(key)
     if record is not None:
         try:
             path = history.record_path(record)
             if path.is_file():
-                return FileResponse(path, media_type=media_type(str(path)),
-                                    filename=record.get("filename") or path.name)
+                mime = media_type(str(path))
+                if inline and not mime.startswith("video/"):
+                    raise HTTPException(status_code=415, detail="This file is not a video.")
+                return FileResponse(
+                    path, media_type=mime, filename=record.get("filename") or path.name,
+                    content_disposition_type="inline" if inline else "attachment",
+                    headers={"X-Content-Type-Options": "nosniff"},
+                )
         except (OSError, ValueError, RuntimeError):
             pass
     raise HTTPException(status_code=404, detail="History file not available.")

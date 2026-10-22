@@ -1,38 +1,18 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { after, before, test } from 'node:test'
-import { chromium } from 'playwright'
+import { startBrowserApp } from './helpers/browser.mjs'
 
-const dist = new URL('../dist/', import.meta.url)
-const mimeTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }
-let browser, server, baseURL
+let app, browser, baseURL
 
 before(async () => {
-  server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, 'http://localhost').pathname
-      const file = new URL(pathname === '/' ? 'index.html' : `.${pathname}`, dist)
-      if (!file.href.startsWith(dist.href)) {
-        response.writeHead(403).end()
-        return
-      }
-      const content = await readFile(file)
-      const extension = file.pathname.slice(file.pathname.lastIndexOf('.'))
-      response.writeHead(200, { 'Content-Type': mimeTypes[extension] || 'application/octet-stream' })
-      response.end(content)
-    } catch {
-      response.writeHead(404).end()
-    }
-  })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  baseURL = `http://127.0.0.1:${server.address().port}`
-  browser = await chromium.launch({ headless: true })
+  app = await startBrowserApp()
+  browser = app.browser
+  baseURL = app.baseURL
 })
 
 after(async () => {
-  await browser?.close()
-  if (server) await new Promise(resolve => server.close(resolve))
+  await app?.close()
 })
 
 function job(id, status = 'queued', extra = {}) {

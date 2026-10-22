@@ -136,7 +136,7 @@ npm test
 | GET | `/api/files/{id}` | - | 下载的文件或 zip |
 | GET | `/api/files/{id}/{index}` | - | 多文件任务中的单个文件 |
 | GET | `/api/history` | - | 历史下载及文件是否仍在磁盘上 |
-| GET/HEAD | `/api/history/files/{key}` | - | 按历史记录取回文件，支持服务器重启后的文件 |
+| GET/HEAD | `/api/history/files/{key}` | 视频播放使用查询参数 `inline=true` | 默认下载附件；视频可内联播放，支持分段读取和服务重启后的文件 |
 | POST | `/api/history/batch-delete` | `{keys: [record_key], delete_files?: false}` | `{removed[], missing[], failed: [{key, reason}]}`，每次 1–100 个标识 |
 | GET | `/api/settings` | - | 当前设置（不含 cookie 内容） |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | 更新后的设置 |
@@ -147,8 +147,9 @@ npm test
 
 `quality` 为 `"best"`（默认）或形如 `"1080"` 的分辨率高度。
 
-历史条目包含逐记录的 `key`，可用文件还带有 `download_url`。精确取回和删除文件时
-使用这些字段；`id` 仍为下载任务标识，多个文件可能共用同一个 `id`。
+历史条目包含逐记录的 `key`，可用文件还带有 `download_url`，可用视频额外带有
+`stream_url` 用于页内播放。精确取回、播放和删除文件时使用这些字段；`id` 仍为
+下载任务标识，多个文件可能共用同一个 `id`。服务重启后仍可访问已有文件。
 
 ## 功能特性
 
@@ -174,8 +175,9 @@ npm test
   不受 TTL 清理影响。为获得更好的 peer/DHT 连通性，建议在 compose/run
   配置中映射 `BT_LISTEN_PORT`（TCP+UDP），例如添加
   `-p 6881:6881/tcp -p 6881:6881/udp`。
-- **预览** - 完成的视频/音频下载可直接在页面内播放（HTTP 页还支持图片），
-  无需重新下载。
+- **视频播放** - 在“最近下载”的可用视频旁点击“播放”，即可打开页内播放器，
+  支持暂停、拖动进度、音量和全屏，关闭即停止。各来源的多个文件可以分别播放。
+  使用浏览器原生解码；格式不受支持或文件失效时会提示原因，并保留下载入口。
 - **历史记录** - 已完成文件记录到 `<DATA_DIR>/history.jsonl`，按来源显示。
   支持多选、本页全选、批量取回可用文件和批量删除记录。删除前需确认，默认保留
   本地文件，也可勾选只删除所选记录的文件。批量取回跳过失效文件，翻页或切换来源

@@ -105,6 +105,7 @@ export interface HistoryEntry {
   id: string
   key: string
   download_url: string | null
+  stream_url?: string | null
   kind: string // "youtube" | "http" | "bt" | "bilibili"
   title: string | null
   thumbnail?: string | null

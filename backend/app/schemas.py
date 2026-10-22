@@ -158,6 +158,7 @@ class HistoryEntry(BaseModel):
     key: str = ""
     download_url: str | None = None
     kind: str  # "youtube" | "http"
+    stream_url: str | None = None
     title: str | None = None
     thumbnail: str | None = None
     thumbnail_candidates: list[str] = Field(default_factory=list)
