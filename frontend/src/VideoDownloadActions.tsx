@@ -1,10 +1,12 @@
 import { useId, useRef, useState } from 'react'
 import { useLang } from './i18n'
 import { Icon } from './Icon'
+import type { VideoFormat } from './types'
 
 type Props = {
   quality: string
   qualities: number[]
+  formats?: VideoFormat[]
   onQualityChange: (quality: string) => void
   onDownload: () => Promise<void>
   selectedCount?: number
@@ -13,7 +15,7 @@ type Props = {
   onZipChange?: (zip: boolean) => void
 }
 
-export function VideoDownloadActions({ quality, qualities, onQualityChange, onDownload, selectedCount, totalCount, zip, onZipChange }: Props) {
+export function VideoDownloadActions({ quality, qualities, formats = [], onQualityChange, onDownload, selectedCount, totalCount, zip, onZipChange }: Props) {
   const { t } = useLang()
   const qualityId = useId()
   const [submitting, setSubmitting] = useState(false)
@@ -33,15 +35,25 @@ export function VideoDownloadActions({ quality, qualities, onQualityChange, onDo
   }
 
   function qualityLabel(value: number) {
-    const badge = value >= 4320 ? '8K' : value >= 2160 ? '4K' : value >= 1440 ? '2K' : value >= 1080 ? 'Full HD' : value >= 720 ? 'HD' : ''
-    return badge ? `${value}p · ${badge}` : `${value}p`
+    // Cropped videos can be reported as 2160p while their actual height is 2026.
+    // Keep the real height as the selection value, and use the source's tier
+    // for display rather than guessing it from the aspect ratio.
+    const format = formats.find((item) => item.vcodec && item.vcodec !== 'none'
+      && (item.resolution?.endsWith(`x${value}`) || item.resolution === `${value}p`)
+      && /^\d+p/i.test(item.format_note ?? ''))
+    const nominal = Number(format?.format_note?.match(/^(\d+)p/i)?.[1]) || value
+    const badge = nominal >= 4320 ? '8K' : nominal >= 2160 ? '4K' : nominal >= 1440 ? '2K' : nominal >= 1080 ? 'Full HD' : nominal >= 720 ? 'HD' : ''
+    const label = badge ? `${nominal}p · ${badge}` : `${nominal}p`
+    return nominal !== value && format?.resolution
+      ? `${label} (${format.resolution.replace('x', '×')})`
+      : label
   }
 
   return (
     <div className="video-download-actions">
       <div className="video-action-heading">
         <span>{t('downloadOptions')}</span>
-        {isBatch && <span className="selection-count" role="status">{t('selectedCount', { n: selectedCount, total: totalCount ?? selectedCount })}</span>}
+        {isBatch && <span className="selection-count" role="status">{totalCount == null ? t('selectedVideos', { n: selectedCount }) : t('selectedCount', { n: selectedCount, total: totalCount })}</span>}
       </div>
       <div className="video-action-controls">
         <div className="quality-control">

@@ -620,6 +620,19 @@ input[type="checkbox"] {
   transition: background var(--t-fast);
 }
 .entries label:hover { background: var(--panel-2); }
+.channel-hint { margin: 12px 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.channel-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.channel-toolbar .zip-check { white-space: normal; }
+.channel-toolbar input, .channel-entries input { flex-shrink: 0; }
+.channel-notice { color: var(--accent); font-size: 12px; line-height: 1.65; }
+.channel-entries { max-height: 420px; }
+.channel-entries label { padding: 10px; }
+.channel-entries .thumb { width: 72px; height: 41px; border-radius: 5px; }
+.channel-entries .thumb-placeholder { font-size: 0; gap: 0; }
+.channel-entry-main { flex: 1; min-width: 0; }
+.channel-entries .entry-title { display: block; }
+.channel-entry-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.channel-pager { margin-bottom: 14px; }
 .entry-title {
   flex: 1;
   min-width: 0;
@@ -656,6 +669,7 @@ input[type="checkbox"] {
   margin-bottom: 7px;
 }
 .job-title {
+  display: block;
   font-weight: 620;
   font-size: 13.5px;
   overflow: hidden;
@@ -664,6 +678,10 @@ input[type="checkbox"] {
   min-width: 0;
 }
 .job-percent { flex-shrink: 0; color: var(--accent); font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
+.job-title-group { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.job-heading { min-width: 0; }
+.job-title-group .thumb { width: 96px; height: 54px; }
+.job-video-details { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .job.done .job-percent { color: var(--ok-text); }
 .job-count {
   color: var(--muted);
@@ -749,6 +767,7 @@ input[type="checkbox"] {
   margin-top: 10px;
   flex-wrap: wrap;
 }
+.job-actions .danger { margin-left: auto; }
 /* Compact controls for the small job card */
 .job-actions button,
 .job-actions .download-link {
@@ -816,11 +835,13 @@ input[type="checkbox"] {
 .history-row:last-child { border-bottom: none; }
 .history-row.expired .history-title { color: var(--muted); }
 .history-file-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 45px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; }
+.history-row > .thumb { width: 104px; height: 59px; }
 .history-main { flex: 1; min-width: 0; }
 .history-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-meta { display: flex; flex-wrap: wrap; gap: 5px 9px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--muted); }
 .history-meta .badge.err { background: var(--err-soft); color: var(--err-text); }
 .history-time, .history-size { font-variant-numeric: tabular-nums; }
+.history-resolution { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .history-source { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-actions { display: flex; gap: 7px; flex-shrink: 0; }
 .history-actions button { padding: 7px 10px; font-size: 11.5px; min-height: 34px; }
@@ -1104,6 +1125,9 @@ input[type="checkbox"] {
   .single-head > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   .thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; }
   .job-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+  .job-title-group { gap: 9px; }
+  .job-title-group .thumb { width: 72px; height: 41px; }
+  .job-video-details { font-size: 10px; }
   .job-metrics dt { font-size: 10px; }
   .job-metrics dd { font-size: 13px; }
   .job-count { font-size: 10px; white-space: normal; text-align: right; }
@@ -1115,6 +1139,8 @@ input[type="checkbox"] {
   .history-row { flex-wrap: wrap; gap: 10px; padding: 17px 0; }
   .history-file-icon { width: 33px; height: 38px; }
   .history-main { flex-basis: calc(100% - 45px); }
+  .history-row > .thumb { width: 88px; height: 50px; }
+  .history-row.has-cover .history-main { flex-basis: calc(100% - 98px); }
   .history-actions { width: 100%; justify-content: flex-end; }
   .history-actions button { min-height: 36px; padding: 7px 13px; }
   .history-time { overflow-wrap: anywhere; }

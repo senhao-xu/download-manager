@@ -80,7 +80,7 @@ pip install -r requirements.txt
 pip install --pre -U yt-dlp          # nightly
 uvicorn app.main:app --reload --port 8000
 
-# system deps: ffmpeg, node >= 22 (for yt-dlp-ejs / JS challenges)
+# system deps: ffmpeg, aria2, node >= 22 (for yt-dlp-ejs / JS challenges)
 
 # frontend (separate terminal)
 cd frontend
@@ -106,6 +106,7 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 | `DOWNLOAD_DIR` | `$DATA_DIR/downloads` | Where downloaded files are stored |
 | `TTL_MINUTES` | `60` | Files older than this are deleted |
 | `MAX_CONCURRENT` | `3` | Concurrent download workers |
+| `VIDEO_CONNECTIONS` | `8` | Connections per video / concurrent HLS-DASH fragments (1–16; 1 disables parallel transfers) |
 | `YTDLP_COOKIEFILE` | _(none)_ | Fallback path to a `cookies.txt` (UI overrides) |
 | `YTDLP_PROXY` | _(none)_ | Fallback HTTP/SOCKS proxy (UI overrides) |
 | `YTDLP_IMPERSONATE` | _(none)_ | Browser TLS impersonation target (e.g. `chrome`) |
@@ -117,9 +118,10 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/info` | `{url}` | Video formats or playlist entries |
+| POST | `/api/info` | `{url, page?, page_size?}` | Video formats, playlist or paginated channel entries |
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
+| POST | `/api/download-queue` | `{entries: [{url, title?}], quality?, skip_downloaded?}` | `{jobs[], skipped_downloaded, skipped_active}` |
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}` (HTTP relay download) |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}` (BitTorrent magnet) |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}` (BitTorrent file) |
@@ -138,6 +140,20 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 `quality` is `"best"` (default) or a height like `"1080"`.
 
 ## Features
+
+- **YouTube channels**: Channel home pages, `/videos`, `/shorts` and `/streams`
+  load 20 entries per page. Selections persist across pages, with up to 100
+  independent jobs per queue. Available local downloads are skipped by default;
+  active duplicates are always skipped. One failed video does not stop the rest.
+  Jobs respect `MAX_CONCURRENT` (default 3).
+
+- **Parallel video downloads**: HTTP video/audio streams use aria2 with up to
+  `VIDEO_CONNECTIONS` byte-range connections; HLS/DASH uses native parallel
+  fragment downloads. Progress and cancellation work throughout. Unsupported
+  transfers fall back to the native downloader; SOCKS proxies and browser
+  impersonation use native transfers. Install `aria2` for local development
+  (included in Docker). Actual connections and speed depend on the server and
+  file size. `MAX_CONCURRENT` separately controls simultaneous jobs.
 
 - **Tabs** - a **Video** tab (paste a video/playlist URL, pick quality,
   download; cookies/proxy configured inline with automatic cookie checks), an

@@ -10,5 +10,5 @@ export function VideoCover({ src, candidates = [], title }: { src: string | null
   if (!source) {
     return <div className="thumb thumb-placeholder" role="img" aria-label={t('coverUnavailable')}><Icon name="youtube" size={25} /><span>{t('coverUnavailable')}</span></div>
   }
-  return <img key={source} src={source} alt={t('videoCover', { title: title || '' })} className="thumb" referrerPolicy="no-referrer" onError={() => setFailedSources((previous) => new Set(previous).add(source))} />
+  return <img key={source} src={source} alt={t('videoCover', { title: title || '' })} className="thumb" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedSources((previous) => new Set(previous).add(source))} />
 }

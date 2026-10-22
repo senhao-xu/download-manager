@@ -37,6 +37,12 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_DEFAULT_TIMEOUT=120
 RUN pip install --no-cache-dir --retries 10 --timeout 120 \
         -r backend/requirements.txt "yt-dlp==${YTDLP_VERSION}"
 
+# HTTP video streams use aria2 for parallel byte-range transfers.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends aria2 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Application code + built frontend (mirrors dev layout: /app/backend, /app/frontend).
 COPY backend/ ./backend/
 COPY --from=frontend /fe/dist ./frontend/dist

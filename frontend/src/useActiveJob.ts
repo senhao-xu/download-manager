@@ -8,7 +8,8 @@ import { triggerDownload } from './JobView'
  *
  * Every job the frontend knows about - whether started this session or restored
  * from the server after a reload - lives in a single `Map<id, JobStatus>`. Each
- * in-flight job owns one EventSource for live progress. Jobs are global (not
+ * running job owns one EventSource; queued jobs share one polling request.
+ * Jobs are global (not
  * per-tab); a tab renders the subset whose `kind` matches.
  *
  * Key behaviors:
@@ -32,6 +33,11 @@ export function useJobs() {
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0)
 
   const esRef = useRef<Map<string, EventSource>>(new Map())
+  const queuedRef = useRef<Map<string, number>>(new Map())
+  const queueTimerRef = useRef<number | null>(null)
+  const pollingRef = useRef(false)
+  const mountedRef = useRef(true)
+  const lifecycleRef = useRef(0)
   // job ids already auto-downloaded (one-shot, prevents re-trigger)
   const autoTriggeredRef = useRef<Set<string>>(new Set())
   // job ids started via a user gesture THIS session -> eligible for auto-download
@@ -46,15 +52,22 @@ export function useJobs() {
   const terminalRef = useRef<Set<string>>(new Set())
 
   // Close every stream when App unmounts (in practice: never, while the page lives).
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      lifecycleRef.current += 1
+      restoredRef.current = false
       esRef.current.forEach((es) => es.close())
       esRef.current.clear()
+      genRef.current.forEach((gen, id) => genRef.current.set(id, gen + 1))
+      queuedRef.current.clear()
+      if (queueTimerRef.current != null) clearTimeout(queueTimerRef.current)
+      queueTimerRef.current = null
       dismissTimers.current.forEach((id) => clearTimeout(id))
       dismissTimers.current.clear()
-    },
-    [],
-  )
+    }
+  }, [])
 
   function setJob(j: JobStatus) {
     setJobs((prev) => {
@@ -75,6 +88,7 @@ export function useJobs() {
 
   /** Apply a snapshot, including the one-shot auto-download for gesture jobs. */
   function applyJob(j: JobStatus) {
+    if (!mountedRef.current) return
     setJob(j)
     if (
       j.status === 'done' &&
@@ -87,18 +101,72 @@ export function useJobs() {
         triggerDownload(urls[0])
       }
     }
+    if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
+      queuedRef.current.delete(j.id)
+      esRef.current.get(j.id)?.close()
+      esRef.current.delete(j.id)
+      if (!terminalRef.current.has(j.id)) {
+        terminalRef.current.add(j.id)
+        onTerminal(j.id, j.status)
+      }
+    }
   }
 
   function genOf(jobId: string): number {
     return genRef.current.get(jobId) ?? 0
   }
 
+  function scheduleQueuePoll() {
+    if (!mountedRef.current || !queuedRef.current.size || pollingRef.current || queueTimerRef.current != null) return
+    queueTimerRef.current = window.setTimeout(() => { void pollQueue() }, 1200)
+  }
+
+  function watchQueued(jobId: string, gen?: number) {
+    const g = gen ?? genOf(jobId) + 1
+    genRef.current.set(jobId, g)
+    esRef.current.get(jobId)?.close()
+    esRef.current.delete(jobId)
+    queuedRef.current.set(jobId, g)
+    scheduleQueuePoll()
+  }
+
+  async function pollQueue() {
+    queueTimerRef.current = null
+    if (!mountedRef.current || pollingRef.current) return
+    pollingRef.current = true
+    const waiting = [...queuedRef.current]
+    try {
+      const active = new Map((await listActiveJobs()).map(job => [job.id, job]))
+      await Promise.all(waiting.map(async ([id, gen]) => {
+        if (!mountedRef.current || genOf(id) !== gen || !queuedRef.current.has(id)) return
+        // A short job may finish between polls and disappear from the active list.
+        const job = active.get(id) ?? await getJob(id)
+        if (!mountedRef.current || genOf(id) !== gen || !queuedRef.current.has(id)) return
+        applyJob(job)
+        if (job.status === 'running' || job.status === 'paused') {
+          queuedRef.current.delete(id)
+          subscribe(id, gen)
+        }
+      }))
+    } catch {
+      // Keep queued jobs registered and retry after a transient network failure.
+    } finally {
+      pollingRef.current = false
+      scheduleQueuePoll()
+    }
+  }
+
   /** When the SSE stream drops, reconcile via REST and resubscribe if still running. */
   function reconcile(jobId: string, gen: number, attempt: number) {
-    if (genOf(jobId) !== gen) return // superseded
+    if (!mountedRef.current || genOf(jobId) !== gen) return // superseded
     getJob(jobId)
       .then((j) => {
-        if (genOf(jobId) !== gen) return
+        if (!mountedRef.current || genOf(jobId) !== gen) return
+        if (j.status === 'queued') {
+          applyJob(j)
+          watchQueued(jobId, gen)
+          return
+        }
         if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
           applyJob(j)
           return
@@ -124,6 +192,7 @@ export function useJobs() {
   }
 
   function subscribe(jobId: string, gen?: number, reconnectAttempt = 0) {
+    if (!mountedRef.current) return
     const g = gen ?? (genRef.current.get(jobId) ?? 0) + 1
     genRef.current.set(jobId, g)
     esRef.current.get(jobId)?.close()
@@ -133,13 +202,7 @@ export function useJobs() {
       if (genOf(jobId) !== g) return
       const j = JSON.parse(ev.data) as JobStatus
       applyJob(j)
-      if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
-        es.close()
-        if (!terminalRef.current.has(j.id)) {
-          terminalRef.current.add(j.id)
-          onTerminal(j.id)
-        }
-      }
+      if (j.status === 'queued') watchQueued(jobId, g)
     }
     es.onerror = () => {
       es.close()
@@ -149,8 +212,10 @@ export function useJobs() {
   }
 
   /** On a job going terminal: refresh history now, auto-dismiss the row shortly. */
-  function onTerminal(jobId: string) {
+  function onTerminal(jobId: string, status: string) {
     setHistoryRefreshTick((n) => n + 1)
+    // Failed videos have no history record; keep their reason visible.
+    if (status === 'error') return
     // Give HistoryList time to refetch and show the completed row, then drop the
     // active row (dedup hides the history copy meanwhile, so no flicker).
     if (dismissTimers.current.has(jobId)) clearTimeout(dismissTimers.current.get(jobId)!)
@@ -158,6 +223,7 @@ export function useJobs() {
       dismissTimers.current.delete(jobId)
       esRef.current.get(jobId)?.close()
       esRef.current.delete(jobId)
+      queuedRef.current.delete(jobId)
       // bump generation so any in-flight reconcile bails, then drop the row
       genRef.current.set(jobId, genOf(jobId) + 1)
       removeJob(jobId)
@@ -176,8 +242,9 @@ export function useJobs() {
     try {
       const jobId = await starter()
       gestureRef.current.add(jobId)
-      setJob({ ...initial, id: jobId })
-      subscribe(jobId)
+      applyJob({ ...initial, id: jobId })
+      if (initial.status === 'queued') watchQueued(jobId)
+      else if (initial.status === 'running' || initial.status === 'paused') subscribe(jobId)
     } catch (err) {
       // Leave it to the caller's catch; nothing was added to the map.
       throw err
@@ -188,11 +255,14 @@ export function useJobs() {
   async function restore() {
     if (restoredRef.current) return
     restoredRef.current = true
+    const lifecycle = lifecycleRef.current
     try {
       const active = await listActiveJobs()
+      if (!mountedRef.current || lifecycleRef.current !== lifecycle) return
       for (const j of active) {
         setJob(j)
-        subscribe(j.id) // NOT added to gestureRef -> no auto-download on restore
+        if (j.status === 'queued') watchQueued(j.id)
+        else subscribe(j.id) // Restored jobs never auto-download.
       }
     } catch {
       // Network/down: non-fatal; the user can still start new jobs.

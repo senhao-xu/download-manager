@@ -5,7 +5,8 @@ import type { HistoryEntry, JobStatus, OwnerTab } from './types'
 import { triggerDownload } from './JobView'
 import { JobView } from './JobView'
 import { Icon } from './Icon'
-import { formatBytes } from './format'
+import { formatBytes, formatVideoDetails } from './format'
+import { VideoCover } from './VideoCover'
 
 const PAGE_SIZE = 10
 
@@ -167,15 +168,20 @@ export function HistoryList({ kind, activeJobs, refreshKey }: {
           <ul className="history-list">
             {historyItems.map((it) => {
               const src = `/api/files/${it.id}`
+              const hasCover = !!(it.thumbnail || it.thumbnail_candidates?.length)
+              const videoDetails = formatVideoDetails(it.resolution, it.fps)
               return (
-                <li key={it.id} className={`history-row${it.available ? '' : ' expired'}`}>
-                  <span className="history-file-icon"><Icon name="file" size={21} /></span>
+                <li key={it.id} className={`history-row${hasCover ? ' has-cover' : ''}${it.available ? '' : ' expired'}`}>
+                  {hasCover
+                    ? <VideoCover src={it.thumbnail ?? null} candidates={it.thumbnail_candidates} title={it.title} />
+                    : <span className="history-file-icon"><Icon name="file" size={21} /></span>}
                   <div className="history-main">
                     <div className="history-title" title={it.title || it.filename || it.id}>
                       {it.title || it.filename || it.id}
                     </div>
                     <div className="history-meta">
                       <span className="badge">{kindLabel(it.kind)}</span>
+                      {videoDetails && <span className="history-resolution" title={t('videoResolution')}>{videoDetails}</span>}
                       {!it.available && <span className="badge err">{t('expired')}</span>}
                       <span className="history-time">{fmtRelative(it.created, lang)}</span>
                       {it.size != null && <span className="history-size">{formatBytes(it.size)}</span>}

@@ -1,4 +1,4 @@
-import type { CookieCheckResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult } from './types'
+import type { CookieCheckResult, HistoryList, InfoResponse, JobStatus, SettingsState, TestResult, VideoQueueResponse } from './types'
 
 async function postJSON(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
@@ -17,8 +17,14 @@ async function readError(r: Response): Promise<string> {
   }
 }
 
-export async function fetchInfo(url: string): Promise<InfoResponse> {
-  const r = await postJSON('/api/info', { url })
+export async function fetchInfo(url: string, page: number = 1, pageSize: number = 20): Promise<InfoResponse> {
+  const r = await postJSON('/api/info', { url, page, page_size: pageSize })
+  if (!r.ok) throw new Error(await readError(r))
+  return r.json()
+}
+
+export async function queueVideos(entries: { url: string; title: string | null }[], quality: string, skipDownloaded: boolean): Promise<VideoQueueResponse> {
+  const r = await postJSON('/api/download-queue', { entries, quality, skip_downloaded: skipDownloaded })
   if (!r.ok) throw new Error(await readError(r))
   return r.json()
 }

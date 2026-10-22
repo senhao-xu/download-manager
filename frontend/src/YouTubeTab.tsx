@@ -8,6 +8,7 @@ import { DownloadPanel } from './DownloadPanel'
 import { Icon } from './Icon'
 import { VideoCover } from './VideoCover'
 import { VideoDownloadActions } from './VideoDownloadActions'
+import { YouTubeChannel } from './YouTubeChannel'
 
 function fmtDuration(s: number | null): string {
   if (s == null) return ''
@@ -21,6 +22,7 @@ function fmtDuration(s: number | null): string {
 export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
   const { t } = useLang()
   const [url, setUrl] = useState('')
+  const [loadedUrl, setLoadedUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [info, setInfo] = useState<InfoResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -34,9 +36,11 @@ export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
     setInfo(null)
     setError(null)
     setLoading(true)
+    const target = url.trim()
     try {
-      const r = await fetchInfo(url.trim())
+      const r = await fetchInfo(target)
       setInfo(r)
+      setLoadedUrl(target)
       setQuality('best')
       setSelected(new Set(r.entries.map((_, i) => i)))
     } catch (err) {
@@ -51,7 +55,7 @@ export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
     setError(null)
     try {
       await startJob(
-        () => startDownload(url.trim(), quality),
+        () => startDownload(loadedUrl, quality),
         { id: '', kind: 'youtube', status: 'queued', progress: 0, current: null, total: null, phase: 'queued', title: info.title, error: null, download_url: null, download_urls: [] } satisfies JobStatus,
       )
     } catch (err) {
@@ -131,13 +135,16 @@ export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
             <VideoDownloadActions
               quality={quality}
               qualities={info.qualities}
+              formats={info.formats}
               onQualityChange={setQuality}
               onDownload={onDownloadSingle}
             />
           </div>
         )}
 
-        {info && info.is_playlist && (
+        {info?.is_channel && <YouTubeChannel key={loadedUrl} url={loadedUrl} initial={info} activeJobs={activeJobs} startJob={startJob} />}
+
+        {info && info.is_playlist && !info.is_channel && (
           <div className="card playlist">
             <div className="playlist-head">
               <div className="playlist-summary">
@@ -165,6 +172,7 @@ export function YouTubeTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
             <VideoDownloadActions
               quality={quality}
               qualities={info.qualities}
+              formats={info.formats}
               onQualityChange={setQuality}
               onDownload={onDownloadBatch}
               selectedCount={selected.size}

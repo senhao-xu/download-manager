@@ -16,6 +16,9 @@ class Settings:
     download_dir: Path = Path(os.getenv("DOWNLOAD_DIR", str(_data_dir / "downloads")))
     ttl_minutes: int = int(os.getenv("TTL_MINUTES", "60"))
     max_concurrent: int = int(os.getenv("MAX_CONCURRENT", "3"))
+    # Per-video HTTP connections / concurrent HLS-DASH fragments. aria2 caps
+    # connections to one server at 16; 1 selects native sequential transfers.
+    video_connections: int = max(1, min(16, int(os.getenv("VIDEO_CONNECTIONS", "8"))))
     port: int = int(os.getenv("PORT", "8000"))
 
     # yt-dlp network/auth knobs (fallbacks; the settings UI overrides these)

@@ -39,6 +39,16 @@ app.include_router(routes.router)
 
 # Serve the built frontend if present (production / Docker). In dev the Vite
 # dev server (frontend/) serves the UI on its own port.
+class _FrontendFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path in {".", "index.html"}:
+            # Revalidate the entry document so deployments load the new hashed
+            # JS/CSS instead of keeping an older interface with a newer API.
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 _frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    app.mount("/", _FrontendFiles(directory=str(_frontend_dist), html=True), name="frontend")

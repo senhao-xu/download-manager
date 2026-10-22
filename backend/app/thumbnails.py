@@ -1,5 +1,6 @@
 """Fetch supported cover images through the server's configured connection."""
-from urllib.parse import urlencode, urlparse
+import re
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from curl_cffi import requests
 
@@ -29,6 +30,37 @@ def thumbnail_url(url: str) -> str:
     # Other extractors retain their original cover URLs; this endpoint is
     # deliberately restricted to the image CDNs of the two supported sites.
     return "/api/thumbnail?" + urlencode({"url": url}) if _allowed(url) else url
+
+
+def youtube_video_id(source: str | None) -> str | None:
+    """Identify a video across watch, short-link, Shorts and embed URLs."""
+    if not source:
+        return None
+    try:
+        parsed = urlparse(source)
+        host = (parsed.hostname or "").lower()
+        parts = parsed.path.strip("/").split("/")
+        video_id = ""
+        if host == "youtu.be":
+            video_id = parts[0]
+        elif host in {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+                      "www.youtube-nocookie.com"}:
+            if parsed.path == "/watch":
+                video_id = parse_qs(parsed.query).get("v", [""])[0]
+            elif len(parts) > 1 and parts[0] in {"shorts", "embed", "live"}:
+                video_id = parts[1]
+        if parsed.scheme not in {"http", "https"} or not re.fullmatch(r"[\w-]{11}", video_id, re.ASCII):
+            return None
+        return video_id
+    except ValueError:
+        return None
+
+
+def source_candidates(source: str | None) -> list[str]:
+    """Recover covers for old YouTube history without re-extracting videos."""
+    video_id = youtube_video_id(source)
+    return [thumbnail_url(f"https://i.ytimg.com/vi/{video_id}/{size}.jpg")
+            for size in ("mqdefault", "hqdefault")] if video_id else []
 
 
 def fetch_thumbnail(url: str) -> tuple[bytes, str]:

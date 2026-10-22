@@ -75,7 +75,7 @@ pip install -r requirements.txt
 pip install --pre -U yt-dlp          # nightly
 uvicorn app.main:app --reload --port 8000
 
-# 系统依赖：ffmpeg、node >= 22（用于 yt-dlp-ejs / JS 挑战）
+# 系统依赖：ffmpeg、aria2、node >= 22（用于 yt-dlp-ejs / JS 挑战）
 
 # 前端（另开一个终端）
 cd frontend
@@ -101,6 +101,7 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 | `DOWNLOAD_DIR` | `$DATA_DIR/downloads` | 下载文件存放位置 |
 | `TTL_MINUTES` | `60` | 超过此时间的文件会被删除 |
 | `MAX_CONCURRENT` | `3` | 并发下载工作线程数 |
+| `VIDEO_CONNECTIONS` | `8` | 每个视频的连接数 / HLS-DASH 并发分片数（1–16，设为 1 关闭并行下载） |
 | `YTDLP_COOKIEFILE` | _(无)_ | `cookies.txt` 的兜底路径（UI 优先） |
 | `YTDLP_PROXY` | _(无)_ | 兜底 HTTP/SOCKS 代理（UI 优先） |
 | `YTDLP_IMPERSONATE` | _(无)_ | 浏览器 TLS 伪装目标（如 `chrome`） |
@@ -112,9 +113,10 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 
 | 方法 | 路径 | 请求体 | 返回 |
 |---|---|---|---|
-| POST | `/api/info` | `{url}` | 视频格式列表或播放列表条目 |
+| POST | `/api/info` | `{url, page?, page_size?}` | 视频格式、播放列表或频道分页条目 |
 | POST | `/api/download` | `{url, quality}` | `{job_id}` |
 | POST | `/api/download-batch` | `{urls[], quality}` | `{job_id}` |
+| POST | `/api/download-queue` | `{entries: [{url, title?}], quality?, skip_downloaded?}` | `{jobs[], skipped_downloaded, skipped_active}` |
 | POST | `/api/download-http` | `{urls[]}` | `{job_id}`（HTTP 中继下载） |
 | POST | `/api/download-bt` | `{magnet}` | `{job_id}`（BitTorrent 磁力链） |
 | POST | `/api/download-bt/file` | multipart `.torrent` | `{job_id}`（BitTorrent 种子文件） |
@@ -133,6 +135,17 @@ cd frontend && npm run build      # 输出到 frontend/dist/，由后端在 / �
 `quality` 为 `"best"`（默认）或形如 `"1080"` 的分辨率高度。
 
 ## 功能特性
+
+- **YouTube 频道**：支持 `@频道/videos`、频道主页及 Shorts/直播列表。每页加载
+  20 条，按需勾选，翻页保留选择，每批最多加入 100 个独立任务。默认跳过本地
+  文件仍可用的已下载视频，始终跳过进行中的重复任务；一个视频失败不影响其他
+  任务。沿用 `MAX_CONCURRENT` 并发限制（默认 3）。
+
+- **视频多连接下载**：HTTP 视频/音频流通过 aria2 建立最多 `VIDEO_CONNECTIONS`
+  个分段连接；HLS/DASH 使用原生并发分片下载。支持实时进度和取消，无法使用时
+  回退到原生下载器。SOCKS 代理和浏览器 TLS 伪装使用原生下载。Docker 已包含
+  aria2，本地开发需安装系统包 `aria2`。实际连接数和速度受服务器、文件大小影响；
+  `MAX_CONCURRENT` 另行控制同时运行的任务数。
 
 - **标签页** - **视频** 页（粘贴视频/播放列表链接，选择清晰度，下载；
   Cookie/代理在页面内配置并自动检测）、**HTTP** 页（粘贴一条或多条

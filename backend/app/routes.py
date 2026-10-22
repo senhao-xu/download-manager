@@ -27,6 +27,8 @@ from .schemas import (
     SettingsUpdate,
     TestRequest,
     TestResult,
+    VideoQueueRequest,
+    VideoQueueResponse,
 )
 from .storage import media_type, job_dir
 from yt_dlp.utils import DownloadError
@@ -46,7 +48,12 @@ def healthz():
 @router.post("/info", response_model=InfoResponse)
 async def post_info(req: InfoRequest):
     try:
-        return await downloader.extract_info(req.url)
+        result = await downloader.extract_info(req.url, page=req.page, page_size=req.page_size)
+        if result.is_channel:
+            available = history.available_video_ids()
+            for entry in result.entries:
+                entry.downloaded = entry.id in available
+        return result
     except DownloadError as e:
         raise HTTPException(status_code=400, detail=_friendly(e))
     except Exception as e:  # pragma: no cover - defensive
@@ -78,6 +85,18 @@ async def post_download_batch(req: BatchRequest):
         raise HTTPException(status_code=400, detail="No URLs selected.")
     job = jobs.start_batch(req.urls, req.quality, req.zip, req.title)
     return JobCreated(job_id=job.id)
+
+
+@router.post("/download-queue", response_model=VideoQueueResponse)
+def post_download_queue(req: VideoQueueRequest):
+    try:
+        created, skipped_downloaded, skipped_active = jobs.queue_videos(
+            req.entries, req.quality, req.skip_downloaded,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return VideoQueueResponse(jobs=[jobs.snapshot(job) for job in created],
+                              skipped_downloaded=skipped_downloaded, skipped_active=skipped_active)
 
 
 @router.post("/download-http", response_model=JobCreated)
@@ -294,10 +313,17 @@ def get_history(kind: str | None = None, page: int = 1, page_size: int = 10):
     for rec in recs:
         path = rec.get("path")
         available = bool(path) and Path(path).exists()
+        covers = downloader.thumbnail_candidates(rec)
+        if not covers and rec.get("kind") == "youtube":
+            covers = thumbnails.source_candidates(rec.get("source"))
         items.append(HistoryEntry(
             id=rec.get("id", ""),
             kind=rec.get("kind", ""),
             title=rec.get("title"),
+            thumbnail=covers[0] if covers else None,
+            thumbnail_candidates=covers,
+            resolution=rec.get("resolution"),
+            fps=rec.get("fps"),
             source=rec.get("source"),
             filename=rec.get("filename"),
             size=rec.get("size"),

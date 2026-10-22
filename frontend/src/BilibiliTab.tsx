@@ -134,6 +134,7 @@ export function BilibiliTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
             <VideoDownloadActions
               quality={quality}
               qualities={info.qualities}
+              formats={info.formats}
               onQualityChange={setQuality}
               onDownload={onDownloadSingle}
             />
@@ -168,6 +169,7 @@ export function BilibiliTab({ activeJobs, startJob, refreshKey }: TabJobProps) {
             <VideoDownloadActions
               quality={quality}
               qualities={info.qualities}
+              formats={info.formats}
               onQualityChange={setQuality}
               onDownload={onDownloadBatch}
               selectedCount={selected.size}

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from .config import settings as cfg
+from .thumbnails import youtube_video_id
 
 logger = logging.getLogger("history")
 
@@ -81,6 +82,16 @@ def delete_by_id(job_id: str) -> dict | None:
             for r in reversed(kept):
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
     return removed
+
+
+def available_video_ids() -> set[str]:
+    """Only skip completed YouTube downloads whose local file still exists."""
+    return {
+        video_id for record in list_all()
+        if record.get("kind") == "youtube"
+        and (video_id := youtube_video_id(record.get("source")))
+        and record.get("path") and Path(record["path"]).is_file()
+    }
 
 
 def list_page(kind: str | None = None, page: int = 1, page_size: int = 10):

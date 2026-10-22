@@ -12,6 +12,7 @@ export interface TabJobProps {
 
 export interface VideoFormat {
   format_id: string | null
+  format_note?: string | null
   ext: string | null
   resolution: string | null
   fps: number | null
@@ -25,6 +26,9 @@ export interface Entry {
   url: string | null
   title: string | null
   duration: number | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  downloaded?: boolean
 }
 
 export interface InfoResponse {
@@ -36,6 +40,10 @@ export interface InfoResponse {
   qualities: number[]
   formats: VideoFormat[]
   entries: Entry[]
+  is_channel?: boolean
+  page?: number
+  page_size?: number
+  has_more?: boolean
 }
 
 export type JobState = 'queued' | 'running' | 'paused' | 'cancelled' | 'done' | 'error'
@@ -54,10 +62,21 @@ export interface JobStatus {
   total: number | null
   phase: string | null
   title: string | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  resolution?: string | null
+  fps?: number | null
   error: string | null
   download_url: string | null
   download_urls: string[]
   kind: string | null
+  source?: string | null
+}
+
+export interface VideoQueueResponse {
+  jobs: JobStatus[]
+  skipped_downloaded: number
+  skipped_active: number
 }
 
 export interface SettingsState {
@@ -86,6 +105,10 @@ export interface HistoryEntry {
   id: string
   kind: string // "youtube" | "http" | "bt" | "bilibili"
   title: string | null
+  thumbnail?: string | null
+  thumbnail_candidates?: string[]
+  resolution?: string | null
+  fps?: number | null
   source: string | null
   filename: string | null
   size: number | null

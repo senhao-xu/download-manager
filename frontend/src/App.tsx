@@ -22,8 +22,8 @@ export default function App() {
   const themeTitle = `${t('themeToggle')} (${t(choice === 'dark' ? 'themeDark' : choice === 'light' ? 'themeLight' : 'themeSystem')})`
 
   // One multi-job store at App level: every in-flight job (started this session
-  // OR restored from the server after a reload) lives here, each with its own
-  // SSE stream. Switching/closing tabs never drops a download. On mount we
+  // OR restored from the server after a reload) lives here. Running jobs use
+  // SSE; queued jobs share a poll. Switching tabs never drops a download. We
   // restore any jobs still running server-side so live progress survives a
   // page reload.
   const jobs = useJobs()

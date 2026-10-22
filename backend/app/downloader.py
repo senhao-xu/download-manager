@@ -8,16 +8,19 @@ import asyncio
 import functools
 import logging
 import re
+import threading
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadError
 
 from .schemas import Entry, Format, InfoResponse
+from .config import settings as cfg
 from .settings import effective_opts
-from .thumbnails import thumbnail_url
+from .thumbnails import source_candidates, thumbnail_url, youtube_video_id
+from .video_dl import VideoYoutubeDL
 
 logger = logging.getLogger("downloader")
 
@@ -40,6 +43,11 @@ def _base_opts(extra: dict | None = None, site: str = "default") -> dict:
         "logger": logger,
         "merge_output_format": "mp4",
         "ignoreerrors": False,
+        "concurrent_fragment_downloads": cfg.video_connections,
+        # The Python API defaults to zero retries (unlike the yt-dlp CLI).
+        # Resume interrupted HTTP streams and retry transient fragment errors.
+        "retries": 5,
+        "fragment_retries": 5,
     }
     if extra:
         opts.update(extra)
@@ -66,7 +74,7 @@ def _https_thumbnail(url: str | None) -> str | None:
     return url
 
 
-def _thumbnail_candidates(info: dict) -> list[str]:
+def thumbnail_candidates(info: dict) -> list[str]:
     alternatives = [t["url"] for t in reversed(info.get("thumbnails") or []) if t.get("url")]
     # yt-dlp may prefer a localized /vi_lc/ cover which the CDN no longer
     # serves. Keep that preference, then try standard covers before variants.
@@ -76,7 +84,7 @@ def _thumbnail_candidates(info: dict) -> list[str]:
 
     alternatives.sort(key=lambda url: not standard_youtube_cover(url))
     candidates = []
-    for url in [info.get("thumbnail"), *alternatives]:
+    for url in [info.get("thumbnail"), *(info.get("thumbnail_candidates") or []), *alternatives]:
         if not url:
             continue
         source = thumbnail_url(_https_thumbnail(url))
@@ -85,7 +93,7 @@ def _thumbnail_candidates(info: dict) -> list[str]:
     if not candidates:
         for entry in info.get("entries") or []:
             if entry:
-                candidates = _thumbnail_candidates(entry)
+                candidates = thumbnail_candidates(entry)
                 if candidates:
                     break
     return candidates[:12]
@@ -94,7 +102,7 @@ def _thumbnail_candidates(info: dict) -> list[str]:
 def _normalize_info(info: dict) -> InfoResponse:
     if info.get("_type") == "playlist":
         raw_entries = list(info.get("entries") or [])
-        covers = _thumbnail_candidates({**info, "entries": raw_entries})
+        covers = thumbnail_candidates({**info, "entries": raw_entries})
         entries = []
         for e in raw_entries:
             if not e:
@@ -117,6 +125,7 @@ def _normalize_info(info: dict) -> InfoResponse:
     formats = [
         Format(
             format_id=f.get("format_id"),
+            format_note=f.get("format_note"),
             ext=f.get("ext"),
             resolution=_resolution(f),
             fps=f.get("fps"),
@@ -133,7 +142,7 @@ def _normalize_info(info: dict) -> InfoResponse:
         reverse=True,
     )
     dur = info.get("duration")
-    covers = _thumbnail_candidates(info)
+    covers = thumbnail_candidates(info)
     return InfoResponse(
         is_playlist=False,
         title=info.get("title"),
@@ -145,16 +154,73 @@ def _normalize_info(info: dict) -> InfoResponse:
     )
 
 
-def extract_info_sync(url: str, site: str = "default") -> InfoResponse:
-    with YoutubeDL(_base_opts({"extract_flat": False}, site=site)) as ydl:
-        info = ydl.extract_info(url, download=False)
+def channel_url(url: str) -> str | None:
+    """Channel landing pages resolve to uploads; explicit video tabs stay put."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+            "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+        }:
+            return None
+        match = re.fullmatch(
+            r"/(@[^/]+|(?:channel|user|c)/[^/]+)(?:/(videos|shorts|streams|featured))?/?",
+            unquote(parsed.path),
+        )
+        if not match:
+            return None
+        tab = match[2] if match[2] not in {None, "featured"} else "videos"
+        return urlunparse(("https", "www.youtube.com", f"/{match[1]}/{tab}", "", parsed.query, ""))
+    except ValueError:
+        return None
+
+
+def _normalize_channel(info: dict, page: int, page_size: int) -> InfoResponse:
+    # yt-dlp's range is bounded to this page plus one look-ahead entry.
+    raw_entries = list(info.get("entries") or [])
+    entries = []
+    for raw in raw_entries[:page_size]:
+        if not raw:
+            continue
+        video_id = youtube_video_id(raw.get("webpage_url") or raw.get("url"))
+        if not video_id and re.fullmatch(r"[\w-]{11}", str(raw.get("id", "")), re.ASCII):
+            video_id = raw["id"]
+        if not video_id:
+            continue
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        covers = thumbnail_candidates(raw) or source_candidates(url)
+        entries.append(Entry(
+            id=video_id, url=url, title=raw.get("title"),
+            duration=int(raw["duration"]) if raw.get("duration") else None,
+            thumbnail=covers[0] if covers else None, thumbnail_candidates=covers,
+        ))
+    covers = thumbnail_candidates(info)
+    if entries:
+        covers = list(dict.fromkeys([*covers, *entries[0].thumbnail_candidates]))[:12]
+    return InfoResponse(
+        is_playlist=True, is_channel=True, title=info.get("title"),
+        thumbnail=covers[0] if covers else None, thumbnail_candidates=covers,
+        entries=entries, page=page, page_size=page_size, has_more=len(raw_entries) > page_size,
+        qualities=[4320, 2160, 1440, 1080, 720, 480, 360],
+    )
+
+
+def extract_info_sync(url: str, site: str = "default", *, page: int = 1, page_size: int = 20) -> InfoResponse:
+    channel = channel_url(url) if site == "default" else None
+    extra = {"extract_flat": False}
+    if channel:
+        start = (page - 1) * page_size + 1
+        extra.update(extract_flat="in_playlist", playliststart=start, playlistend=start + page_size)
+    with YoutubeDL(_base_opts(extra, site=site)) as ydl:
+        info = ydl.extract_info(channel or url, download=False)
     if info is None:
         raise DownloadError("No information could be extracted from that URL.")
+    if channel:
+        return _normalize_channel(info, page, page_size)
     return _normalize_info(info)
 
 
-async def extract_info(url: str, site: str = "default") -> InfoResponse:
-    return await run_blocking(extract_info_sync, url, site)
+async def extract_info(url: str, site: str = "default", *, page: int = 1, page_size: int = 20) -> InfoResponse:
+    return await run_blocking(extract_info_sync, url, site, page=page, page_size=page_size)
 
 
 def format_for_quality(quality: str) -> str:
@@ -206,14 +272,21 @@ def download_sync(url: str, quality: str, dest_dir: Path, progress_hook,
     ``site="bilibili"`` selects Bilibili-specific cookies (see settings.py).
     """
     fmt = format_for_quality(quality)
+    progress_lock = threading.Lock()
+
+    def report(event):
+        # Native fragment workers may invoke hooks from different threads.
+        with progress_lock:
+            progress_hook(event)
+
     opts = _base_opts({
         "format": fmt,
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
-        "progress_hooks": [progress_hook],
+        "progress_hooks": [report],
     }, site=site)
     before = {p.name for p in dest_dir.iterdir()} if dest_dir.is_dir() else set()
-    with YoutubeDL(opts) as ydl:
-        ydl.add_post_processor(_TransferMetadataPP(progress_hook), when="before_dl")
+    with VideoYoutubeDL(opts) as ydl:
+        ydl.add_post_processor(_TransferMetadataPP(report), when="before_dl")
         info = ydl.extract_info(url, download=True)
     files = _new_files(dest_dir, before)
     if not files:

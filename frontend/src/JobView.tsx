@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useLang } from './i18n'
 import { cancelJob, pauseJob, resumeJob } from './api'
 import type { JobStatus } from './types'
-import { formatBytes } from './format'
+import { formatBytes, formatVideoDetails } from './format'
+import { VideoCover } from './VideoCover'
 
 function formatEta(seconds: number): string {
   const value = Math.max(0, Math.ceil(seconds))
@@ -47,6 +48,7 @@ export function JobView({ job }: { job: JobStatus }) {
   const { t } = useLang()
   const [busy, setBusy] = useState<string | null>(null)
   const pct = Math.max(0, Math.min(100, job.progress))
+  const videoDetails = formatVideoDetails(job.resolution, job.fps)
   const itemTotal = job.total ?? 1
   const isBatch = itemTotal > 1
   const urls = job.download_urls?.length ? job.download_urls : (job.download_url ? [job.download_url] : [])
@@ -115,7 +117,13 @@ export function JobView({ job }: { job: JobStatus }) {
   return (
     <div className={`card job ${job.status}`}>
       <div className="job-head">
-        <span className="job-title" title={job.title || undefined}>{job.title || (isBatch ? t('playlistDownload') : t('jobDownload'))}</span>
+        <div className="job-title-group">
+          {(job.thumbnail || job.thumbnail_candidates?.length) ? <VideoCover src={job.thumbnail ?? null} candidates={job.thumbnail_candidates} title={job.title} /> : null}
+          <div className="job-heading">
+            <span className="job-title" title={job.title || undefined}>{job.title || (isBatch ? t('playlistDownload') : t('jobDownload'))}</span>
+            {videoDetails && <span className="job-video-details" title={t('videoResolution')}>{videoDetails}</span>}
+          </div>
+        </div>
         <strong className="job-percent">{indeterminate ? '—' : `${pct.toFixed(1).replace(/\.0$/, '')}%`}</strong>
       </div>
       <div className="job-status-row">
