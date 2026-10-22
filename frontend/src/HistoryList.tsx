@@ -6,6 +6,7 @@ import { downloadAll, JobView, triggerDownload } from './JobView'
 import { Icon } from './Icon'
 import { formatBytes, formatVideoDetails } from './format'
 import { VideoCover } from './VideoCover'
+import { VideoPlayer } from './VideoPlayer'
 
 const PAGE_SIZE = 10
 
@@ -80,6 +81,7 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
   const [data, setData] = useState<{ view: string; items: HistoryEntry[]; total: number } | null>(null)
   const [failedView, setFailedView] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [playing, setPlaying] = useState<HistoryEntry | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   // Snapshot the precise records when confirmation opens.
@@ -107,6 +109,7 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
         if (page > lastPage) {
           setSelected(new Set())
           setDeleting(null)
+          setPlaying(null)
           setPage(lastPage)
           return
         }
@@ -118,6 +121,28 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
       .catch(() => { if (!cancelled) setFailedView(view) })
     return () => { cancelled = true }
   }, [kind, page, view])
+
+  useEffect(() => {
+    if (!current || !playing?.stream_url) return
+    const item = data.items.find(entry => entry.key === playing.key)
+    if (item) {
+      if (!item.available || !item.stream_url) {
+        setPlaying(null)
+        setMessage(t('videoUnavailable'))
+      }
+      return
+    }
+    // A new download can push the playing record off this page. Check existence
+    // rather than interrupting playback merely because pagination shifted.
+    let cancelled = false
+    fetch(playing.stream_url, { method: 'HEAD' }).then(response => {
+      if (!cancelled && response.status === 404) {
+        setPlaying(null)
+        setMessage(t('videoUnavailable'))
+      }
+    }).catch(() => { /* A transient refresh failure must not interrupt playback. */ })
+    return () => { cancelled = true }
+  }, [current, data, playing, t])
 
   // Deduplicate active and briefly pinned completed jobs. An error stays visible
   // but must not hide files that succeeded earlier in the same HTTP batch.
@@ -154,6 +179,7 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
       const result = await deleteHistoryBatch(deleting.map(item => item.key), deleteFiles)
       if (!mounted.current) return
       const finished = new Set([...result.removed, ...result.missing])
+      setPlaying(previous => previous && finished.has(previous.key) ? null : previous)
       setSelected(previous => new Set([...previous].filter(key => !finished.has(key))))
       if (result.failed.length) {
         const names = new Map(deleting.map(item => [item.key, item.title || item.filename || item.id]))
@@ -187,6 +213,7 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
   }
 
   function changePage(next: number) {
+    setPlaying(null)
     setSelected(new Set())
     cancelDelete()
     setError(null)
@@ -206,7 +233,7 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
   const hasActive = activeJobs.length > 0
 
   return (
-    <div className="history-inline">
+    <div className="history-inline" tabIndex={-1}>
       <h3 className="history-inline-head">
         <Icon name="history" size={19} />
         {t('historyTitle')} <span className="history-count">{total}</span>
@@ -303,6 +330,8 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
                     </div>
                   </div>
                   <div className="history-actions">
+                    {it.stream_url && it.available && <button className="play-btn" disabled={locked}
+                      onClick={() => setPlaying(it)}><Icon name="play" size={13} />{t('playVideo')}</button>}
                     <button
                       onClick={() => { if (it.download_url) triggerDownload(it.download_url) }}
                       disabled={locked || !it.available || !it.download_url}
@@ -334,6 +363,9 @@ function HistoryForKind({ kind, activeJobs, refreshKey }: {
           </button>
         </nav>
       )}
+      {playing?.stream_url && <VideoPlayer key={playing.key} src={playing.stream_url}
+        title={playing.title || playing.filename || playing.id} poster={playing.thumbnail}
+        downloadUrl={playing.download_url} onClose={() => setPlaying(null)} />}
     </div>
   )
 }

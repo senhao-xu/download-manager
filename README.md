@@ -141,7 +141,7 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 | GET | `/api/files/{id}` | - | The downloaded file or zip |
 | GET | `/api/files/{id}/{index}` | - | One file from a multi-file job |
 | GET | `/api/history` | - | Past downloads with on-disk availability |
-| GET/HEAD | `/api/history/files/{key}` | - | One persisted history file, including after restarts |
+| GET/HEAD | `/api/history/files/{key}` | query `inline=true` for video playback | One persisted file; attachment by default, inline video with byte-range support |
 | POST | `/api/history/batch-delete` | `{keys: [record_key], delete_files?: false}` | `{removed[], missing[], failed: [{key, reason}]}` (1–100 keys) |
 | GET | `/api/settings` | - | Current settings (no cookie content) |
 | PUT | `/api/settings` | `{proxy, js_runtimes}` | Updated settings |
@@ -153,8 +153,9 @@ block, persisted to `DATA_DIR`. These env vars are defaults/fallbacks:
 `quality` is `"best"` (default) or a height like `"1080"`.
 
 History entries include a per-record `key` and a `download_url` for available
-files. Use these for precise file retrieval/deletion; `id` still identifies the
-download job and may be shared by multiple files.
+files. Available videos also expose a `stream_url` for inline playback. Use these
+for precise file retrieval/playback/deletion; `id` still identifies the download
+job and may be shared by multiple files. File access survives server restarts.
 
 ## Features
 
@@ -185,8 +186,11 @@ download job and may be shared by multiple files.
   a running BT job is exempt from the TTL cleanup. For best peer/DHT
   connectivity, publish port `BT_LISTEN_PORT` (TCP+UDP) in your compose/run
   config, e.g. add `-p 6881:6881/tcp -p 6881:6881/udp`.
-- **Preview** - completed video/audio downloads play in-page (and images for the
-  HTTP tab) without re-downloading.
+- **Video playback** - click **Play** beside an available video in Recent downloads
+  to open the in-page player, with pause, seeking, volume and fullscreen controls.
+  Closing it stops playback. Files use browser-native decoding; if a format is
+  unsupported or a file is unavailable, the player explains the failure and keeps
+  the download option. Playback works for individual files across all sources.
 - **History** - completed files are recorded to `<DATA_DIR>/history.jsonl` and
   listed under each source. Select individual records or the current page to
   download available files or delete records in a batch. Deletion requires
