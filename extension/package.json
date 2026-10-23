@@ -1,9 +1,10 @@
 {
   "name": "youtube-local-downloader",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:extension": "node --import tsx --test tests/browser/*.test.ts",

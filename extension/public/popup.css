@@ -7,7 +7,7 @@ html{width:400px;min-width:400px;background:var(--bg)}
 body{width:100%;margin:0;color:var(--fg);font:14px/1.5 system-ui,"Microsoft YaHei",sans-serif}
 [hidden]{display:none!important}
 header{display:flex;gap:11px;align-items:center;padding:20px 20px 17px}
-.mark{display:grid;place-items:center;flex:0 0 38px;height:38px;border-radius:12px;background:var(--accent);color:#fff;font-size:25px;font-weight:500}
+.mark{display:block;flex:0 0 38px;width:38px;height:38px}
 h1{font-size:16px;margin:0;font-weight:650;white-space:nowrap}header p{margin:2px 0 0;color:var(--sub);font-size:12px}
 main{padding:0 16px}.card{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
 .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.eyebrow{color:var(--sub);font-size:12px}
