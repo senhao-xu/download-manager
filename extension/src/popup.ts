@@ -1,7 +1,7 @@
 import { call, messageError, terminal } from './types';
 import type { Choice, Task, VideoInfo } from './types';
 import { labels } from './widget';
-import { bytes, videoId, defaultChoice, progressPercent } from './core';
+import { bytes, videoId, defaultChoice, progressPercent, taskSize } from './core';
 
 const get = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const error = get<HTMLParagraphElement>('#error');
@@ -26,6 +26,7 @@ function renderCurrent() {
   get('#cancel').hidden = terminal(task.state);
   const progress = get<HTMLProgressElement>('#progress'); progress.hidden = terminal(task.state);
   if (task.state === 'downloading' && percent !== undefined) progress.value = percent; else progress.removeAttribute('value');
+  get('#task-size').textContent = taskSize(task);
   get('#task-error').textContent = task.error || '';
 }
 function renderChoice() {
@@ -97,10 +98,19 @@ async function history() {
     if (!tasks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '下载后可在这里查看进度和文件'; list.append(empty); return; }
     for (const task of tasks.slice(0, 5)) {
       const row = document.createElement('div'); row.className = 'record';
-      const text = document.createElement('div');
+      const text = document.createElement('div'); text.className = 'record-info';
       const name = document.createElement('div'); name.className = 'record-title'; name.textContent = task.filename || task.title; name.title = task.filename || task.title;
-      const status = document.createElement('div'); status.className = 'record-status'; status.textContent = `${task.choice.label} · ${task.choice.container.toUpperCase()} · ${labels[task.state]}`;
-      text.append(name, status); row.append(text);
+      const percent = progressPercent(task);
+      const status = document.createElement('div'); status.className = 'record-status'; status.textContent = `${task.choice.label} · ${task.choice.container.toUpperCase()} · ${labels[task.state]}${task.state === 'downloading' && percent !== undefined ? ` · ${percent}%` : ''}`;
+      text.append(name, status);
+      if (!terminal(task.state)) {
+        const progress = document.createElement('progress'); progress.className = 'record-progress'; progress.max = 100;
+        progress.setAttribute('aria-label', `${task.title}下载进度`); progress.setAttribute('aria-valuetext', status.textContent);
+        if (task.state === 'downloading' && percent !== undefined) progress.value = percent;
+        text.append(progress);
+      }
+      const size = document.createElement('div'); size.className = 'record-size'; size.textContent = taskSize(task);
+      text.append(size); row.append(text);
       if (!terminal(task.state) || task.downloadId !== undefined && (task.state === 'completed' || !!task.filename)) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'record-action'; button.textContent = terminal(task.state) ? '显示文件' : '取消';
         button.addEventListener('click', () => void call(terminal(task.state) ? 'show' : 'cancel', { id: task.id, downloadId: task.downloadId }).then(history).catch(value => { error.textContent = messageError(value); }));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { choices, filename, mediaURL, videoId, playbackMatches, defaultChoice, mediaMime, progressPercent, matchesSavedName } from '../src/core';
-import type { PageSnapshot, RawFormat } from '../src/types';
+import { choices, filename, mediaURL, videoId, playbackMatches, defaultChoice, mediaMime, progressPercent, matchesSavedName, bytes, taskSize } from '../src/core';
+import type { PageSnapshot, RawFormat, Task } from '../src/types';
 
 const id = 'aqz-KE-bpKQ';
 test('watch, short link and Shorts identify exactly one video', () => {
@@ -82,6 +82,23 @@ test('progress handles unknown sizes and estimates without claiming early comple
   for (const total of [undefined, 0, -1, Infinity, NaN]) assert.equal(progressPercent({ state: 'downloading', received: 50, total }), undefined);
   for (const state of ['merging', 'saving', 'failed', 'cancelled'] as const) assert.equal(progressPercent({ state, received: 100, total: 100 }), undefined);
   assert.equal(progressPercent({ state: 'completed', received: 120, total: 100 }), 100);
+});
+test('size formatting distinguishes zero and small downloads from an unknown total', () => {
+  assert.equal(bytes(0), '0 B'); assert.equal(bytes(50), '50 B');
+  assert.equal(bytes(1250), '1.3 KB'); assert.equal(bytes(25_000_000), '25.0 MB'); assert.equal(bytes(1_500_000_000), '1.5 GB');
+  for (const value of [undefined, -1, NaN, Infinity]) assert.equal(bytes(value), '大小未知');
+});
+test('task size uses transfer totals while active and actual muxed file size after completion', () => {
+  const task: Task = { id: 'test', videoId: id, title: 'Test', created: 0, state: 'downloading', received: 25_000_000,
+    choice: { id: 'test', label: '1080p', container: 'mp4', estimatedBytes: 100_000_000 } };
+  assert.equal(taskSize(task), '25.0 MB / 约 100.0 MB');
+  assert.equal(taskSize({ ...task, total: 90_000_000 }), '25.0 MB / 约 90.0 MB');
+  assert.equal(taskSize({ ...task, received: 0 }), '0 B / 约 100.0 MB');
+  assert.equal(taskSize({ ...task, choice: { ...task.choice, estimatedBytes: undefined } }), '25.0 MB / 总大小未知');
+  assert.equal(taskSize({ ...task, state: 'completed', fileSize: 24_000_000 }), '文件大小 24.0 MB');
+  assert.equal(taskSize({ ...task, state: 'completed' }), '已下载 25.0 MB');
+  assert.equal(taskSize({ ...task, state: 'completed', received: 0 }), '文件大小未知');
+  assert.equal(taskSize({ ...task, state: 'completed', fileSize: 0 }), '文件大小 0 B');
 });
 test('playback binding tolerates native configuration changes but rejects a different video/media identity', () => {
   const source = { ...snapshot([]), sabrUrl: 'https://rr1.googlevideo.com/videoplayback?id=stream-a', ustreamerConfig: 'old' };

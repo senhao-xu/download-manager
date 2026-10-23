@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube 本机下载",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "在 YouTube 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
   "minimum_chrome_version": "120",
   "permissions": [

@@ -35,6 +35,12 @@ async function reconcile() {
     if (item?.state === 'in_progress') await chrome.downloads.cancel(item.id).catch(() => {});
     task.state = 'failed'; task.error = '浏览器或扩展已重启，任务中断。请打开视频后重新下载。';
   }
+  // Populate older completed records once on startup. The muxed file size can
+  // differ from the received source bytes, so use Chrome's saved-file metadata.
+  await Promise.all(values.filter(task => task.state === 'completed' && task.fileSize === undefined && task.downloadId !== undefined).map(async task => {
+    const item = (await chrome.downloads.search({ id: task.downloadId! }).catch(() => []))[0];
+    if (item && Number.isFinite(item.fileSize) && item.fileSize >= 0) task.fileSize = item.fileSize;
+  }));
   await persist(values);
 }
 const initialized = reconcile();
@@ -125,6 +131,7 @@ async function finishDownload(id: number, state: string, error?: string) {
   if (state === 'complete') {
     const item = (await chrome.downloads.search({ id }))[0];
     task.filename = item?.filename.split(/[\\/]/).pop();
+    if (item && Number.isFinite(item.fileSize) && item.fileSize >= 0) task.fileSize = item.fileSize;
     if (!task.filename || !matchesSavedName(task.filename, task.title, task.choice.container)) {
       task.state = 'failed'; task.error = `保存文件名与视频标题或格式不符：${task.filename || '未知文件名'}。预期为 ${filename(task.title, task.choice.container)}，请检查浏览器下载设置或其他下载扩展。`;
     } else task.state = 'completed';

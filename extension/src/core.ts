@@ -89,8 +89,19 @@ export function choices(snapshot: PageSnapshot): VideoInfo {
 }
 
 export function bytes(value?: number): string {
-  if (!value) return '大小未知';
+  if (value === undefined || !Number.isFinite(value) || value < 0) return '大小未知';
+  if (value < 1000) return `${Math.floor(value)} B`;
+  if (value < 1e6) return `${(value / 1000).toFixed(1)} KB`;
   return value >= 1e9 ? `${(value / 1e9).toFixed(1)} GB` : `${(value / 1e6).toFixed(1)} MB`;
+}
+
+export function taskSize(task: Pick<Task, 'state' | 'received' | 'total' | 'choice' | 'fileSize'>): string {
+  if (task.state === 'completed') {
+    if (task.fileSize !== undefined && Number.isFinite(task.fileSize) && task.fileSize >= 0) return `文件大小 ${bytes(task.fileSize)}`;
+    return task.received > 0 ? `已下载 ${bytes(task.received)}` : '文件大小未知';
+  }
+  const total = task.total && task.total > 0 && Number.isFinite(task.total) ? task.total : task.choice.estimatedBytes;
+  return `${bytes(task.received)} / ${total && total > 0 && Number.isFinite(total) ? `约 ${bytes(total)}` : '总大小未知'}`;
 }
 
 // choices() orders video formats by resolution, frame rate, then MP4 preference.

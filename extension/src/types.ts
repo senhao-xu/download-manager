@@ -27,7 +27,7 @@ export interface VideoInfo { videoId: string; title: string; duration: number; c
 export type TaskState = 'queued' | 'resolving' | 'downloading' | 'merging' | 'saving' | 'completed' | 'failed' | 'cancelled';
 export interface Task {
   id: string; videoId: string; title: string; choice: Choice; state: TaskState;
-  created: number; received: number; total?: number; error?: string; downloadId?: number; filename?: string;
+  created: number; received: number; total?: number; error?: string; downloadId?: number; filename?: string; fileSize?: number;
 }
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string };
 export const terminal = (state: TaskState) => ['completed', 'failed', 'cancelled'].includes(state);

@@ -101,7 +101,9 @@ try {
       console.log(JSON.stringify({ concurrency }));
       assert.equal(extname(files[0].filename), `.${task.choice.container}`);
       assert.equal(task.filename, basename(files[0].filename));
+      assert.equal(task.fileSize, files[0].fileSize);
       await popup.locator('.record-title').filter({ hasText: task.filename }).first().waitFor();
+      await popup.locator('.record').filter({ hasText: task.filename }).first().locator('.record-size').filter({ hasText: '文件大小' }).waitFor();
       await popup.locator('body').screenshot({ path: resolve('artifacts/youtube-saved-file-preview.png') });
       const expectedMime = task.choice.container === 'm4a' ? 'audio/mp4' : `${task.choice.videoItag ? 'video' : 'audio'}/${task.choice.container}`;
       // Chrome's download database also uses extension-based MIME aliases.

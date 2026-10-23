@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { Input, Output, BufferSource, BufferTarget, WebMOutputFormat, ALL_FORMATS, Conversion } from 'mediabunny';
 import type { PageSnapshot, Reply, Task } from '../../src/types';
+import { bytes } from '../../src/core';
 
 const clip = await readFile(new URL('../../../frontend/tests/fixtures/playback.webm', import.meta.url));
 async function split(audio: boolean) {
@@ -169,11 +170,15 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   assert.equal(download.filename, join(downloadPath, 'Fixture _ 音画.webm'), JSON.stringify({ filename: download.filename, mime: download.mime }));
   assert.equal(download.mime, 'video/webm');
   const file = await readFile(download.filename);
+  assert.equal(done!.fileSize, file.length);
   const input = new Input({ source: new BufferSource(file), formats: ALL_FORMATS });
   assert.equal(await (await input.getPrimaryVideoTrack())!.getCodec(), 'vp8');
   assert.equal(await (await input.getPrimaryAudioTrack())!.getCodec(), 'opus');
   assert.ok(Math.abs((await input.computeDuration()) - 8) < .05); input.dispose();
   await popup.reload(); assert.equal((await send<Task[]>('list'))[0].state, 'completed');
+  const completedRecord = popup.locator('.record').filter({ hasText: done!.filename! });
+  await completedRecord.locator('.record-size').filter({ hasText: `文件大小 ${bytes(file.length)}` }).waitFor();
+  assert.equal(await completedRecord.locator('.record-progress').count(), 0);
   // The new primary popup action starts a real task; formats and preference are
   // shared with the inline menu, without another menu-opening click.
   await worker.evaluate(id => chrome.tabs.update(id, { active: true }), tabId);
@@ -213,6 +218,10 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   assert.equal(await inline.locator('.menu:popover-open').count(), 0);
   assert.match(await inline.locator('.main').textContent() || '', new RegExp(`${percent}%`));
   assert.equal(await popup.locator('#progress').getAttribute('value'), String(percent));
+  const transferSize = `${bytes(video.length)} / 约 ${bytes(video.length + audio.length)}`;
+  await popup.locator('#task-size').filter({ hasText: transferSize }).waitFor();
+  assert.equal(await popup.locator('.record').first().locator('.record-progress').getAttribute('value'), String(percent));
+  await popup.locator('.record').first().locator('.record-size').filter({ hasText: transferSize }).waitFor();
   await mkdir('artifacts', { recursive: true });
   await inline.screenshot({ path: resolve('artifacts/youtube-progress-preview.png') });
   await popup.close();
@@ -222,10 +231,18 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   await inline.locator('.inline-progress[value]').waitFor({ state: 'visible' });
   assert.equal(await inline.locator('.inline-progress').getAttribute('value'), String(percent));
   popup = await context.newPage(); await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await popup.bringToFront(); await popup.reload();
+  await popup.locator('#video-title').filter({ hasText: '先打开一个 YouTube 视频' }).waitFor();
+  await popup.locator('.record').first().locator('.record-progress[value]').waitFor({ state: 'visible' });
+  assert.equal(await popup.locator('.record').first().locator('.record-progress').getAttribute('value'), String(percent));
+  assert.match(await popup.locator('.record').first().locator('.record-status').textContent() || '', new RegExp(`${percent}%`));
+  await popup.locator('.record').first().locator('.record-size').filter({ hasText: transferSize }).waitFor();
+  await popup.locator('body').screenshot({ path: resolve('artifacts/youtube-history-progress-preview.png') });
   assert.equal(['queued', 'resolving', 'downloading'].includes((await send<Task[]>('list')).find(item => item.id === cancelled.id)!.state), true);
   await send('cancel', { id: cancelled.id });
   for (const release of heldAudio.splice(0)) release();
   await inline.locator('.inline-progress').waitFor({ state: 'hidden' });
+  await popup.locator('.record').first().locator('.record-progress').waitFor({ state: 'hidden' });
   await popup.waitForTimeout(300);
   assert.equal((await send<Task[]>('list')).find(item => item.id === cancelled.id)!.state, 'cancelled');
   assert.equal(await popup.evaluate(async id => (await navigator.storage.getDirectory()).getDirectoryHandle(`yt-${id}`).then(() => true, () => false), cancelled.id), false);
@@ -235,6 +252,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
       const tasks = (await chrome.storage.local.get('tasks')).tasks as Task[];
       const task = tasks.find(item => item.id === value.id)!;
       task.state = value.state; task.total = value.total; task.received = value.received;
+      if (value.state === 'downloading' && value.total === undefined) task.choice.estimatedBytes = undefined;
       await chrome.storage.local.set({ tasks });
     }, { id: cancelled.id, state, total, received });
     await page.waitForFunction(label => document.querySelector('#yt-local-download-root')!.shadowRoot!.querySelector('.main span')!.textContent === label, state === 'downloading' ? '正在下载' : state === 'merging' ? '正在合并音画' : '正在保存文件');
@@ -242,11 +260,14 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   await present('downloading');
   assert.equal(await inline.locator('.inline-progress').isVisible(), true);
   assert.equal(await inline.locator('.inline-progress').getAttribute('value'), null);
+  await popup.locator('.record').first().locator('.record-size').filter({ hasText: '50 B / 总大小未知' }).waitFor();
+  assert.equal(await popup.locator('.record').first().locator('.record-progress').getAttribute('value'), null);
   for (const state of ['merging', 'saving'] as const) {
     await present(state, 100, 120);
     assert.equal(await inline.locator('.inline-progress').isVisible(), true);
     assert.equal(await inline.locator('.inline-progress').getAttribute('value'), null);
     assert.doesNotMatch(await inline.locator('.main').textContent() || '', /100%/);
+    assert.equal(await popup.locator('.record').first().locator('.record-progress').getAttribute('value'), null);
   }
   await worker.evaluate(async id => {
     const tasks = (await chrome.storage.local.get('tasks')).tasks as Task[];
@@ -372,6 +393,25 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   }
   assert.equal(rejectedMime?.state, 'failed'); assert.match(rejectedMime?.error || '', /媒体类型/);
   assert.equal(rejectedMime?.downloadId, undefined);
+  // A 0.1.4 record has received bytes but no saved fileSize. Restart just the
+  // service worker to exercise startup backfill from Chrome's real download.
+  await worker.evaluate(async id => {
+    const tasks = (await chrome.storage.local.get('tasks')).tasks as Task[];
+    delete tasks.find(item => item.id === id)!.fileSize;
+    await chrome.storage.local.set({ tasks });
+  }, done!.id);
+  const recovery = await context.newCDPSession(popup);
+  const running = new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Extension worker version was not reported')), 5000);
+    recovery.on('ServiceWorker.workerVersionUpdated', event => {
+      const version = event.versions.find(value => value.scriptURL === `chrome-extension://${extensionId}/background.js` && value.runningStatus === 'running');
+      if (version) { clearTimeout(timeout); resolve(version.versionId); }
+    });
+  });
+  await recovery.send('ServiceWorker.enable');
+  await recovery.send('ServiceWorker.stopWorker', { versionId: await running });
+  assert.equal((await send<Task[]>('list')).find(value => value.id === done!.id)!.fileSize, file.length);
+  await recovery.detach();
   await page.evaluate(() => { history.pushState({}, '', '/watch?v=fixture_003'); document.dispatchEvent(new Event('yt-navigate-finish')); });
   await page.waitForTimeout(350);
   // Replacing an unpacked extension in an existing tab must replace its orphan
