@@ -1,7 +1,7 @@
 import { call, messageError, terminal } from './types';
 import type { BatchEntry, CollectionPage, Task } from './types';
 import { collectionSource, QUEUE_LIMIT } from './batch-core';
-import { progressPercent, taskSize } from './core';
+import { bytes, coverURL, progressPercent, taskSize } from './core';
 import { labels } from './widget';
 
 const get = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -10,24 +10,51 @@ const status = get('#source-status');
 const input = get<HTMLInputElement>('#source-url');
 const entries = new Map<string, BatchEntry>();
 const selected = new Set<string>();
+const entryMetadata = new Map<string, HTMLElement>();
+let queueTasks: Task[] = [];
 let source = ''; let continuation: string | undefined; let loading = false;
 get('#version').textContent = `版本 ${chrome.runtime.getManifest().version}`;
+function cover(videoId: string, value?: string) {
+  const frame = document.createElement('span'); frame.className = 'cover'; frame.textContent = '暂无封面';
+  const url = coverURL(value, videoId.startsWith('bilibili:') ? 'bilibili' : 'youtube', videoId);
+  if (url) {
+    const image = document.createElement('img'); image.alt = '视频封面'; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer'; image.src = url;
+    image.addEventListener('error', () => image.remove()); frame.append(image);
+  }
+  return frame;
+}
+function resolution(task: Task) {
+  const choice = task.choice;
+  if (choice.id === 'pending') return '下载时读取';
+  if (choice.videoItag === undefined) return '仅音频';
+  return choice.width && choice.height ? `${choice.width}×${choice.height}` : choice.height ? `${choice.height}p` : choice.label;
+}
+function updateEntryMetadata() {
+  for (const [id, label] of entryMetadata) {
+    const task = queueTasks.find(task => task.videoId === id && task.choice.id !== 'pending');
+    const size = task?.state === 'completed' ? task.fileSize !== undefined ? bytes(task.fileSize) : '未知' : task?.choice.estimatedBytes ? `约 ${bytes(task.choice.estimatedBytes)}` : '下载时估算';
+    label.textContent = `分辨率：${task ? resolution(task) : '下载时读取'} · 大小：${size}`;
+  }
+}
 function selectionCount() {
   get('#selection-count').textContent = `已选 ${selected.size} / ${entries.size}`;
   get<HTMLButtonElement>('#enqueue').disabled = loading || !selected.size;
 }
 function renderEntries() {
-  const list = get('#entries'); list.replaceChildren();
+  const list = get('#entries'); list.replaceChildren(); entryMetadata.clear();
   for (const entry of entries.values()) {
     const row = document.createElement('label'); row.className = 'entry';
     const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.has(entry.videoId);
     check.addEventListener('change', () => { if (check.checked) selected.add(entry.videoId); else selected.delete(entry.videoId); selectionCount(); });
-    const name = document.createElement('span'); name.textContent = entry.title;
-    row.append(check, name); list.append(row);
+    const text = document.createElement('span'); text.className = 'entry-info';
+    const name = document.createElement('span'); name.className = 'entry-title'; name.textContent = entry.title;
+    const metadata = document.createElement('span'); metadata.className = 'entry-meta'; entryMetadata.set(entry.videoId, metadata);
+    text.append(name, metadata); row.append(check, cover(entry.videoId, entry.thumbnail), text); list.append(row);
   }
   get('#selection').hidden = !entries.size;
   get('#more').hidden = !continuation || entries.size >= QUEUE_LIMIT;
   selectionCount();
+  updateEntryMetadata();
 }
 async function read(more = false) {
   if (loading) return;
@@ -73,6 +100,7 @@ async function renderQueue() {
   queueRendering = true;
   try {
     const [tasks, settings] = await Promise.all([call<Task[]>('list'), chrome.storage.local.get('queuePaused')]);
+    queueTasks = tasks; updateEntryMetadata();
     const pending = tasks.filter(task => !terminal(task.state));
     get('#queue-count').textContent = `${pending.length} 个未完成 · ${tasks.filter(task => task.state === 'completed').length} 个已完成`;
     get('#queue-state').textContent = settings.queuePaused ? '后续任务已暂停；当前下载继续。' : pending.length ? '队列运行中' : '暂无等待任务';
@@ -88,12 +116,13 @@ async function renderQueue() {
       const percent = progressPercent(task);
       const detail = document.createElement('div'); detail.className = 'record-status'; detail.textContent = `${labels[task.state]} · ${task.choice.label}${percent !== undefined ? ` · ${percent}%` : ''}`;
       content.append(title, detail);
+      const dimensions = document.createElement('div'); dimensions.className = 'record-resolution'; dimensions.textContent = `分辨率：${resolution(task)}${task.choice.id !== 'pending' ? ` · ${task.choice.container.toUpperCase()}` : ''}`; content.append(dimensions);
       if (!terminal(task.state) && task.state !== 'queued') {
         const bar = document.createElement('progress'); bar.max = 100; bar.setAttribute('aria-label', `${task.title}下载进度`);
         if (percent !== undefined) bar.value = percent; content.append(bar);
       }
-      if (task.state !== 'queued') { const size = document.createElement('div'); size.className = 'record-size'; size.textContent = taskSize(task); content.append(size); }
-      row.append(content);
+      const size = document.createElement('div'); size.className = 'record-size'; size.textContent = task.state === 'queued' ? '大小：下载时估算' : taskSize(task); content.append(size);
+      row.append(cover(task.videoId, task.thumbnail), content);
       const actions = document.createElement('div'); actions.className = 'actions';
       const add = (text: string, type: string, data: Record<string, unknown>) => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'record-action'; button.textContent = text;

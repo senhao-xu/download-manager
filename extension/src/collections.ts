@@ -1,5 +1,6 @@
 import type { CollectionPage, CollectionSource } from './types';
 import { collectionSource } from './batch-core';
+import { coverURL } from './core';
 
 export function parseYouTubeCollection(input: unknown, title: string, continuation = false): CollectionPage {
   type Obj = Record<string, unknown>;
@@ -30,7 +31,7 @@ export function parseYouTubeCollection(input: unknown, title: string, continuati
       title = text(obj(obj(lockup.metadata).lockupMetadataViewModel).title);
     }
     if (typeof id === 'string' && /^[\w-]{11}$/.test(id) && renderer.isPlayable !== false) {
-      entries.set(id, { videoId: id, title: title || id, url: `https://www.youtube.com/watch?v=${id}` });
+      entries.set(id, { videoId: id, title: title || id, url: `https://www.youtube.com/watch?v=${id}`, thumbnail: coverURL(undefined, 'youtube', id) });
       return; // Do not ingest menus, recommendations, or ads attached to a video.
     }
     const token = obj(obj(obj(value.continuationItemRenderer).continuationEndpoint).continuationCommand).token;
@@ -145,7 +146,7 @@ export async function readBilibiliCollection(source: CollectionSource, page = 1)
       const parts = array(data.pages);
       const entries = parts.slice((page - 1) * 30, page * 30).map(item => {
         const part = obj(item); const number = Number(part.page);
-        return { videoId: `bilibili:${bvid}:p${number}`, title: `${title} - P${number} ${String(part.part || '')}`, url: `https://www.bilibili.com/video/${bvid}/${number === 1 ? '' : `?p=${number}`}` };
+        return { videoId: `bilibili:${bvid}:p${number}`, title: `${title} - P${number} ${String(part.part || '')}`, url: `https://www.bilibili.com/video/${bvid}/${number === 1 ? '' : `?p=${number}`}`, thumbnail: coverURL(data.pic, 'bilibili') };
       });
       return { title, entries, continuation: parts.length > page * 30 ? String(page + 1) : undefined };
     }
@@ -159,7 +160,7 @@ export async function readBilibiliCollection(source: CollectionSource, page = 1)
   }
   const entries = records.map(item => {
     const record = obj(item); const bvid = String(record.bvid || obj(record.arc).bvid || '');
-    return { videoId: `bilibili:${bvid}:p1`, title: String(record.title || obj(record.arc).title || bvid), url: `https://www.bilibili.com/video/${bvid}/` };
+    return { videoId: `bilibili:${bvid}:p1`, title: String(record.title || obj(record.arc).title || bvid), url: `https://www.bilibili.com/video/${bvid}/`, thumbnail: coverURL(record.pic || record.cover || obj(record.arc).pic, 'bilibili') };
   }).filter(entry => /^bilibili:BV[0-9A-Za-z]{10}:p1$/.test(entry.videoId));
   if (!entries.length) throw new Error('合集暂无可下载视频，或当前账号无权访问。');
   return { title, entries, continuation: total > page * 30 ? String(page + 1) : undefined };

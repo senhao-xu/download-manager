@@ -37,10 +37,12 @@ try {
     const media = new Input({ source: new BufferSource(await readFile(saved.filename)), formats: ALL_FORMATS });
     const video = await media.getPrimaryVideoTrack(); const audio = await media.getPrimaryAudioTrack();
     assert.ok(video); assert.ok(audio); assert.ok(task.fileSize > 0);
-    evidence.push({ videoId: task.videoId, filename: task.filename, bytes: task.fileSize, duration: await media.computeDuration(), videoCodec: await video.getCodec(), audioCodec: await audio.getCodec(), quality: task.choice.label });
+    assert.ok(task.thumbnail); assert.ok(task.choice.width > 0); assert.ok(task.choice.height > 0);
+    evidence.push({ videoId: task.videoId, filename: task.filename, bytes: task.fileSize, duration: await media.computeDuration(), videoCodec: await video.getCodec(), audioCodec: await audio.getCodec(), quality: task.choice.label, width: task.choice.width, height: task.choice.height, cover: task.thumbnail });
     media.dispose();
   }
   await mkdir('artifacts', { recursive: true });
+  await manager.waitForFunction(count => { const images = [...document.querySelectorAll('.record .cover img')]; return images.length === count && images.every(image => image.complete && image.naturalWidth > 0); }, entries.length, { timeout: 20000 });
   await manager.screenshot({ path: resolve('artifacts/live-batch-preview.png'), fullPage: true });
   await writeFile('artifacts/live-batch-evidence.json', JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify({ passed: true, evidence }));

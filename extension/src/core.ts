@@ -2,6 +2,18 @@ import type { Choice, PageSnapshot, RawFormat, VideoInfo, PlaybackSession, Task,
 
 export const BILIBILI_MEDIA_HOSTS = ['bilivideo.com', 'bilivideo.cn', 'upos-hz-mirrorakam.akamaized.net'];
 
+export function coverURL(value: unknown, site: Site = 'youtube', videoId = ''): string | undefined {
+  if (typeof value === 'string') {
+    try {
+      const url = new URL(value);
+      const allowed = site === 'youtube' ? url.hostname === 'i.ytimg.com' && /^\/vi(?:_webp)?\//.test(url.pathname)
+        : url.hostname.endsWith('.hdslb.com') && url.pathname.startsWith('/bfs/');
+      if (allowed && ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.port) { url.protocol = 'https:'; return url.href; }
+    } catch { /* Invalid/foreign covers use the ordinary placeholder. */ }
+  }
+  if (site === 'youtube' && /^[\w-]{11}$/.test(videoId)) return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+}
+
 export function videoTarget(input: string): VideoTarget {
   const url = new URL(input);
   if (url.protocol !== 'https:' || url.username || url.password || url.port) throw new Error('请输入有效的 YouTube 或 Bilibili HTTPS 视频链接。');
@@ -99,14 +111,14 @@ export function choices(snapshot: PageSnapshot): VideoInfo {
     // Keep one compatible codec pair per resolution, frame rate and container.
     const label = snapshot.site === 'bilibili' && format.qualityLabel || `${format.height}p`;
     if (list.some(choice => choice.label === label && choice.fps === format.fps && choice.container === container)) continue;
-    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label, height: format.height, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
+    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label, width: format.width, height: format.height, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
   }
   for (const webm of [false, true]) {
     const format = bestAudio(webm);
     if (format) list.push({ id: `audio:${format.itag}`, audioItag: format.itag, label: '仅音频', container: webm ? 'webm' : 'm4a', estimatedBytes: size(format) });
   }
   if (!list.length) throw new Error(`未获得可下载格式。请先播放几秒视频，再刷新列表；登录或验证提示需在 ${siteName} 页面完成。`);
-  return { site: snapshot.site, videoId: snapshot.videoId, title: snapshot.title, duration: snapshot.duration, choices: list };
+  return { site: snapshot.site, videoId: snapshot.videoId, title: snapshot.title, thumbnail: coverURL(snapshot.thumbnail, snapshot.site, snapshot.videoId), duration: snapshot.duration, choices: list };
 }
 
 export function bytes(value?: number): string {

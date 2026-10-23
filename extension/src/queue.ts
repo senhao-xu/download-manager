@@ -1,5 +1,5 @@
 import { batchEntries, batchQuality, qualityChoice, QUEUE_LIMIT } from './batch-core';
-import { choices } from './core';
+import { choices, coverURL } from './core';
 import { messageError, terminal } from './types';
 import type { PageSnapshot, Task } from './types';
 
@@ -62,6 +62,7 @@ export function createQueue(deps: Dependencies) {
           const values = await deps.tasks(); const current = values.find(value => value.id === task.id);
           if (!current || terminal(current.state)) return;
           current.title = resolved.title; current.choice = choice;
+          current.thumbnail = coverURL(resolved.thumbnail || current.thumbnail, resolved.site, current.videoId);
           await deps.persist(values);
           await deps.run(current, resolved, tab.id!);
         });
@@ -95,7 +96,7 @@ export function createQueue(deps: Dependencies) {
         const fresh = entries.filter(entry => !pending.some(task => task.videoId === entry.videoId));
         if (pending.length + fresh.length > QUEUE_LIMIT) throw new Error(`队列最多保留 ${QUEUE_LIMIT} 个未完成任务。`);
         const created: Task[] = fresh.map((entry, index) => ({ id: crypto.randomUUID(), videoId: entry.videoId,
-          site: entry.videoId.startsWith('bilibili:') ? 'bilibili' : 'youtube', title: entry.title,
+          site: entry.videoId.startsWith('bilibili:') ? 'bilibili' : 'youtube', title: entry.title, thumbnail: entry.thumbnail,
           choice: { id: 'pending', label: quality === 'best' ? '最高画质' : quality === 'audio' ? '仅音频' : `≤${quality}p`, container: quality === 'audio' ? 'm4a' : 'mp4' },
           state: 'queued', created: Date.now() + index / 1000, received: 0, batch: { url: entry.url, quality },
         }));

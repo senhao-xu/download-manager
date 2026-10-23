@@ -1,4 +1,4 @@
-import { videoTarget, defaultChoice } from './core';
+import { videoTarget, defaultChoice, coverURL } from './core';
 import type { BatchEntry, BatchQuality, Choice, CollectionSource, VideoInfo } from './types';
 
 export const QUEUE_LIMIT = 1000;
@@ -14,6 +14,8 @@ export function collectionSource(input: string): CollectionSource {
     if (channel) return { site: 'youtube', kind: 'channel', id: channel[1], url: `https://www.youtube.com/${channel[1]}/${channel[2] === 'shorts' ? 'shorts' : 'videos'}` };
   }
   if (url.hostname === 'space.bilibili.com') {
+    const uploader = url.pathname.match(/^\/([1-9]\d*)(?:\/(?:upload\/video|video))?\/?$/);
+    if (uploader) return { site: 'bilibili', kind: 'channel', id: uploader[1], owner: uploader[1], url: `https://space.bilibili.com/${uploader[1]}/upload/video` };
     const match = url.pathname.match(/^\/([1-9]\d*)\/(?:lists\/([1-9]\d*)|channel\/(collectiondetail|seriesdetail))\/?$/);
     const id = match?.[2] || url.searchParams.get('sid');
     if (match && id && /^[1-9]\d*$/.test(id)) {
@@ -23,7 +25,7 @@ export function collectionSource(input: string): CollectionSource {
   }
   const target = videoTarget(input);
   if (target.site === 'bilibili') return { site: 'bilibili', kind: 'video', id: target.identity, url: target.url };
-  throw new Error('支持 YouTube 播放列表、频道 Videos/Shorts，以及 Bilibili 合集链接或合集内的视频链接。');
+  throw new Error('支持 YouTube 播放列表、频道 Videos/Shorts，以及 Bilibili UP 主页、投稿、合集或视频链接。');
 }
 
 export function batchEntries(value: unknown): BatchEntry[] {
@@ -33,7 +35,7 @@ export function batchEntries(value: unknown): BatchEntry[] {
     if (!item || typeof item !== 'object' || typeof item.url !== 'string' || typeof item.title !== 'string') throw new Error('视频列表无效。');
     const target = videoTarget(item.url);
     if (item.videoId !== target.videoId) throw new Error('视频标识与链接不匹配。');
-    unique.set(target.videoId, { videoId: target.videoId, title: item.title.slice(0, 500) || target.identity, url: target.url });
+    unique.set(target.videoId, { videoId: target.videoId, title: item.title.slice(0, 500) || target.identity, url: target.url, thumbnail: coverURL(item.thumbnail, target.site, target.videoId) });
   }
   return [...unique.values()];
 }

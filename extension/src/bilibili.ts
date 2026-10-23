@@ -9,7 +9,7 @@ export async function readBilibili(identity: string, part: number): Promise<Page
     bandwidth?: number; width?: number; height?: number; frameRate?: string; frame_rate?: string; size?: number;
   }
   interface Video {
-    bvid: string; aid: number; title: string; rights?: { is_stein_gate?: number };
+    bvid: string; aid: number; title: string; pic?: string; rights?: { is_stein_gate?: number };
     pages: { cid: number; page: number; part: string; duration: number }[];
   }
   interface Playback {
@@ -61,6 +61,7 @@ export async function readBilibili(identity: string, part: number): Promise<Page
     }
     return {
       site: 'bilibili', videoId: `bilibili:${identity}:p${part}`, title: video.pages.length > 1 ? `${video.title} - P${part} ${page.part}` : video.title,
+      thumbnail: video.pic,
       duration: page.duration || Number(playback.timelength || 0) / 1000,
       status: 'OK', live: false, formats, client: {},
     };

@@ -6,9 +6,11 @@ import { join, resolve } from 'node:path';
 import { createServer } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { Input, BufferSource, ALL_FORMATS } from 'mediabunny';
 import type { Task, Reply, CollectionPage } from '../../src/types';
+import { collectionSource } from '../../src/batch-core';
 
 test('Shorts, paginated collections and persistent sequential batch queue in the real MV3 package', { timeout: 90000 }, async t => {
   const profile = await mkdtemp(join(tmpdir(), 'batch-extension-'));
@@ -16,14 +18,30 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   await writeFile(join(profile, 'Default', 'Preferences'), JSON.stringify({ download: { default_directory: downloads, prompt_for_download: false } }));
   execFileSync('openssl', ['req', '-x509', '-nodes', '-newkey', 'rsa:2048', '-subj', '/CN=fixture.googlevideo.com', '-keyout', join(profile, 'key.pem'), '-out', join(profile, 'cert.pem'), '-days', '1'], { stdio: 'pipe' });
   const media = await readFile(new URL('../../../frontend/tests/fixtures/playback.webm', import.meta.url));
-  let rejectBad = true; let hold = true;
+  let rejectBad = true; let hold = true; let uploadDenied = false;
   let youtube: (request: IncomingMessage, response: ServerResponse) => void;
   const server = createServer({ key: await readFile(join(profile, 'key.pem')), cert: await readFile(join(profile, 'cert.pem')) }, (request, response) => {
     if (request.headers.host?.startsWith('www.youtube.com')) { youtube(request, response); return; }
     if (request.headers.host?.startsWith('space.bilibili.com')) {
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end('<html><body><div id="native-content">Bilibili 合集原生内容</div></body></html>'); return;
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end('<html><body><div id="native-content">Bilibili 合集原生内容</div><script>fetch("https://api.bilibili.com/x/space/wbi/arc/search?mid=123&pn=1&ps=40&dm_img_str=native-page-field&native_fixture=1").then(()=>{window.nativeReady=true;});</script></body></html>'); return;
     }
     if (request.headers.host?.startsWith('api.bilibili.com')) {
+      const url = new URL(request.url!, 'https://api.bilibili.com');
+      if (url.pathname === '/x/web-interface/nav') {
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://space.bilibili.com', 'Access-Control-Allow-Credentials': 'true' });
+        response.end(JSON.stringify({ code: 0, data: { wbi_img: { img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png' } } })); return;
+      }
+      if (url.pathname === '/x/space/wbi/arc/search') {
+        if (!url.searchParams.has('native_fixture')) {
+          const unsigned = url.search.slice(1).replace(/&w_rid=[^&]+$/, '');
+          assert.equal(url.searchParams.get('w_rid'), createHash('md5').update(unsigned + 'ea1db124af3c7062474693fa704f4ff8').digest('hex'));
+          assert.equal(url.searchParams.get('dm_img_str'), 'native-page-field');
+          assert.equal(url.searchParams.get('ps'), '30');
+        }
+        const next = url.searchParams.get('pn') === '2';
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://space.bilibili.com', 'Access-Control-Allow-Credentials': 'true' });
+        response.end(JSON.stringify({ code: uploadDenied ? -403 : 0, message: uploadDenied ? '访问受限' : '', data: { page: { count: 31 }, list: { vlist: [{ bvid: next ? 'BV1EEao6uExB' : 'BV1GJ411x7h7', title: next ? '投稿第二页' : '投稿第一页', author: 'CLS同学', pic: 'http://i0.hdslb.com/bfs/archive/test.jpg' }] } } })); return;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 0, data: { meta: { name: '测试合集' }, page: { total: 1 }, archives: [{ bvid: 'BV1GJ411x7h7', title: '合集视频' }] } })); return;
     }
     const params = new URL(request.url!, 'https://fixture.googlevideo.com').searchParams;
@@ -38,8 +56,9 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, acceptDownloads: true,
     ignoreDefaultArgs: ['--disable-extensions'], args: ['--no-sandbox', '--enable-unsafe-extension-debugging', '--ignore-certificate-errors', '--no-proxy-server', `--host-resolver-rules=MAP fixture.googlevideo.com 127.0.0.1:${port}, MAP www.youtube.com 127.0.0.1:${port}, MAP space.bilibili.com 127.0.0.1:${port}, MAP api.bilibili.com 127.0.0.1:${port}`] });
   t.after(async () => { await context.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); await rm(profile, { recursive: true, force: true }); });
+  await context.route(/https:\/\/(?:i\.ytimg\.com|i0\.hdslb\.com)\//, route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jV1sAAAAASUVORK5CYII=', 'base64') }));
   const player = (id: string) => ({ videoDetails: { videoId: id, title: `测试 ${id}`, lengthSeconds: '8' }, playabilityStatus: { status: 'OK' }, streamingData: { formats: [
-    { itag: 18, mimeType: 'video/webm; codecs="vp8, opus"', bitrate: 10000, height: 90, fps: 10, audioChannels: 2, url: `https://fixture.googlevideo.com/videoplayback?id=${id}`, contentLength: String(media.length) },
+    { itag: 18, mimeType: 'video/webm; codecs="vp8, opus"', bitrate: 10000, width: 160, height: 90, fps: 10, audioChannels: 2, url: `https://fixture.googlevideo.com/videoplayback?id=${id}`, contentLength: String(media.length) },
   ] } });
   const item = (id: string) => ({ playlistVideoRenderer: { videoId: id, title: { simpleText: `测试 ${id}` } } });
   const listData = (next: boolean) => ({ contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content: { playlistVideoListRenderer: { contents: [
@@ -115,20 +134,32 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   const batchButton = sourcePage.getByRole('button', { name: '批量下载此列表', exact: true });
   await batchButton.waitFor();
   const opened: import('playwright').Page[] = [];
-  for (const source of ['https://www.youtube.com/@fixture/videos', 'https://www.youtube.com/playlist?list=PL_fixture', 'https://space.bilibili.com/123/lists/456?type=season']) {
+  for (const source of ['https://www.youtube.com/@fixture/videos', 'https://www.youtube.com/playlist?list=PL_fixture', 'https://space.bilibili.com/123/lists/456?type=season', 'https://space.bilibili.com/123', 'https://space.bilibili.com/123/video', 'https://space.bilibili.com/123/upload/video']) {
     if (source.includes('/playlist')) {
       await sourcePage.evaluate(() => { history.pushState({}, '', '/playlist?list=PL_fixture'); document.dispatchEvent(new Event('yt-navigate-finish')); });
       await sourcePage.waitForTimeout(250);
-    } else if (source.includes('bilibili')) await sourcePage.goto(source);
+    } else if (source.includes('bilibili')) { await sourcePage.goto(source); await sourcePage.waitForFunction(() => (window as Window & { nativeReady?: boolean }).nativeReady); }
     await batchButton.waitFor();
     assert.equal(await sourcePage.locator('#yt-local-download-root').count(), 1);
     const next = context.waitForEvent('page'); await batchButton.click(); const panel = await next; opened.push(panel);
     await panel.waitForURL(`chrome-extension://${extensionId}/batch.html?source=*`);
     await panel.locator('.entry').first().waitFor();
-    assert.equal(await panel.getByLabel('播放列表、频道或合集链接').inputValue(), source);
+    assert.equal(await panel.getByLabel('播放列表、频道或合集链接').inputValue(), collectionSource(source).url);
     if (source.includes('bilibili')) {
       assert.equal(await sourcePage.locator('#native-content').textContent(), 'Bilibili 合集原生内容');
       assert.equal(await sourcePage.locator('#yt-local-download-root').evaluate(host => host.parentElement === document.body), true);
+      if (collectionSource(source).kind === 'channel') {
+        assert.equal(await panel.locator('.entry .cover img').getAttribute('src'), 'https://i0.hdslb.com/bfs/archive/test.jpg');
+        assert.match(await panel.locator('.entry-meta').textContent() || '', /分辨率：下载时读取.*大小：下载时估算/);
+        const before = await worker.evaluate(() => (globalThis as typeof globalThis & { collectionTabs?: { created: number; removed: number } }).collectionTabs);
+        await panel.getByRole('button', { name: '加载更多', exact: true }).click(); await panel.locator('.entry').nth(1).waitFor();
+        assert.match(await panel.locator('.entry').nth(1).textContent() || '', /投稿第二页/);
+        assert.deepEqual(await worker.evaluate(() => (globalThis as typeof globalThis & { collectionTabs?: { created: number; removed: number } }).collectionTabs), before);
+        uploadDenied = true;
+        const denied = await panel.evaluate(async () => chrome.runtime.sendMessage({ target: 'background', type: 'collection', url: 'https://space.bilibili.com/123/upload/video' }));
+        assert.equal(denied.ok, false); assert.match(denied.error, /-403.*登录或完成验证/); uploadDenied = false;
+        await panel.screenshot({ path: resolve('artifacts/bilibili-uploads-metadata-preview.png'), fullPage: true });
+      }
     }
   }
   await sourcePage.goto('https://www.youtube.com/watch?v=fixture_011');
@@ -141,6 +172,10 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   await manager.getByRole('button', { name: '加入下载队列', exact: true }).click();
   const bad = await waitTask('batch_bad01', 'failed');
   const good = await waitTask('batch_good1', 'completed'); await waitTask('batch_good2', 'completed');
+  const goodRow = manager.locator(`.record[data-id="${good.id}"]`);
+  assert.match(await goodRow.locator('.record-resolution').textContent() || '', /160×90.*WEBM/);
+  assert.match(await goodRow.locator('.record-size').textContent() || '', /文件大小/);
+  assert.ok((await goodRow.locator('.cover img').getAttribute('src'))?.includes('/batch_good1/'));
   const saved = (await worker.evaluate(async id => chrome.downloads.search({ id }), good.downloadId!))[0];
   const output = new Input({ source: new BufferSource(await readFile(saved.filename)), formats: ALL_FORMATS });
   assert.ok(await output.getPrimaryVideoTrack()); assert.ok(await output.getPrimaryAudioTrack()); assert.ok(Math.abs(await output.computeDuration() - 8) < .05); output.dispose();

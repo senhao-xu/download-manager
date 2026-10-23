@@ -1,5 +1,5 @@
 import { VideoPlaybackAbrRequest } from 'googlevideo/protos';
-import { videoId, videoTarget, choices, filename, mediaMime, matchesSavedName, BILIBILI_MEDIA_HOSTS } from './core';
+import { videoId, videoTarget, choices, filename, mediaMime, matchesSavedName, BILIBILI_MEDIA_HOSTS, coverURL } from './core';
 import { readPlayer } from './page';
 import { readBilibili } from './bilibili';
 import { call, messageError, terminal } from './types';
@@ -7,6 +7,7 @@ import type { Task, PlaybackSession, PageSnapshot, Reply } from './types';
 import { collectionSource, batchEntries } from './batch-core';
 import { readYouTubeCollection, browseYouTube, readBilibiliCollection } from './collections';
 import { createQueue } from './queue';
+import { readBilibiliUploads } from './bilibili-uploads';
 
 const extensionOrigin = chrome.runtime.getURL('');
 let creation: Promise<void> | undefined;
@@ -142,7 +143,8 @@ async function collection(input: unknown, token: unknown) {
   if (token !== undefined && (typeof token !== 'string' || token.length > 20000)) throw new Error('分页标识无效。');
   if (source.site === 'bilibili') {
     if (token !== undefined && !/^[1-9]\d{0,5}$/.test(String(token))) throw new Error('分页标识无效。');
-    const value = await readBilibiliCollection(source, token ? Number(token) : 1);
+    const value = source.kind === 'channel' ? await readBilibiliUploads(source.url, token ? Number(token) : 1)
+      : await readBilibiliCollection(source, token ? Number(token) : 1);
     return { ...value, entries: batchEntries(value.entries) };
   }
   const value = await readYouTubeCollection(source.url, token as string | undefined, async (context, continuation) => {
@@ -231,7 +233,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         if (source.videoId !== data.videoId) throw new Error('视频已经切换，请重新选择清晰度。');
         const choice = choices(source).choices.find(item => item.id === data.choiceId);
         if (!choice) throw new Error('该清晰度不可用，请刷新列表。');
-        const task: Task = { id: crypto.randomUUID(), site: source.site || 'youtube', videoId: source.videoId, title: source.title, choice, state: 'queued', created: Date.now(), received: 0 };
+        const task: Task = { id: crypto.randomUUID(), site: source.site || 'youtube', videoId: source.videoId, title: source.title, thumbnail: coverURL(source.thumbnail, source.site, source.videoId), choice, state: 'queued', created: Date.now(), received: 0 };
         values.unshift(task); await persist(values);
         try {
           await runTask(task, source, tabId);

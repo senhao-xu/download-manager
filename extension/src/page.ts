@@ -3,7 +3,7 @@ import type { PageSnapshot } from './types';
 // This function is serialized by chrome.scripting. Keep it self contained.
 export async function readPlayer(expectedId: string, direct = false): Promise<PageSnapshot> {
   type PlayerResponse = {
-    videoDetails?: { videoId?: string; title?: string; lengthSeconds?: string; isLive?: boolean };
+    videoDetails?: { videoId?: string; title?: string; lengthSeconds?: string; isLive?: boolean; thumbnail?: { thumbnails?: { url: string }[] } };
     playabilityStatus?: { status?: string; reason?: string };
     streamingData?: { formats?: PageSnapshot['formats']; adaptiveFormats?: PageSnapshot['formats']; serverAbrStreamingUrl?: string };
     playerConfig?: { mediaCommonConfig?: { mediaUstreamerRequestConfig?: { videoPlaybackUstreamerConfig?: string } } };
@@ -45,6 +45,7 @@ export async function readPlayer(expectedId: string, direct = false): Promise<Pa
   const data = response.streamingData;
   return JSON.parse(JSON.stringify({
     videoId: expectedId, title: response.videoDetails?.title || document.title,
+    thumbnail: response.videoDetails?.thumbnail?.thumbnails?.at(-1)?.url,
     duration: Number(response.videoDetails?.lengthSeconds || 0),
     live: !!response.videoDetails?.isLive,
     status: response.playabilityStatus?.status || 'UNAVAILABLE', reason: response.playabilityStatus?.reason,

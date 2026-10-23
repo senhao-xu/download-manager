@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>批量下载 · YouTube / Bilibili</title><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="batch.css"></head>
 <body>
-  <header><img class="mark" src="icons/icon128.png" width="38" height="38" alt=""><div><h1>批量下载</h1><p>YouTube 播放列表 / 频道 · Bilibili 合集 / 分 P</p></div><span id="version" class="muted"></span></header>
+  <header><img class="mark" src="icons/icon128.png" width="38" height="38" alt=""><div><h1>批量下载</h1><p>YouTube 播放列表 / 频道 · Bilibili UP 投稿 / 合集 / 分 P</p></div><span id="version" class="muted"></span></header>
   <main class="workspace">
     <section class="card" aria-label="选择视频">
       <h2>添加视频</h2>
-      <form id="source-form"><label for="source-url">播放列表、频道或合集链接</label><div class="input-row"><input id="source-url" type="url" required placeholder="粘贴列表链接，Bilibili 也可粘贴合集中的视频链接"><button id="read" class="secondary" type="submit">读取列表</button></div></form>
-      <p class="muted">YouTube 频道可使用 /videos 或 /shorts 链接。列表按页读取，可继续加载后再选择。</p>
+      <form id="source-form"><label for="source-url">播放列表、频道或合集链接</label><div class="input-row"><input id="source-url" type="url" required placeholder="粘贴列表、Bilibili UP 主页、投稿或合集链接"><button id="read" class="secondary" type="submit">读取列表</button></div></form>
+      <p class="muted">支持 YouTube 频道和 Bilibili UP 投稿。列表按页读取，可继续加载后再选择；请保留原站点页面打开。分辨率和大小随实际解析结果补全。</p>
       <p id="source-status" role="status" aria-live="polite"></p>
       <div id="selection" hidden>
         <div class="section-head"><h2 id="source-title"></h2><span id="selection-count" class="muted"></span></div>
