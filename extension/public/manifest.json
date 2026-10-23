@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube / Bilibili 本机下载",
-  "version": "0.2.2",
+  "version": "0.3.1",
   "description": "在 YouTube 或 Bilibili 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
   "minimum_chrome_version": "120",
   "icons": {
@@ -26,6 +26,7 @@
     "https://www.bilibili.com/*",
     "https://m.bilibili.com/*",
     "https://bilibili.com/*",
+    "https://space.bilibili.com/*",
     "https://api.bilibili.com/*",
     "https://*.bilivideo.com/*",
     "https://*.bilivideo.cn/*",
@@ -51,7 +52,8 @@
         "https://m.youtube.com/*",
         "https://www.bilibili.com/*",
         "https://m.bilibili.com/*",
-        "https://bilibili.com/*"
+        "https://bilibili.com/*",
+        "https://space.bilibili.com/*"
       ],
       "js": [
         "content.js"
@@ -60,6 +62,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://www.youtube.com https://m.youtube.com https://*.googlevideo.com https://*.bilivideo.com https://*.bilivideo.cn https://upos-hz-mirrorakam.akamaized.net; worker-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://www.youtube.com https://m.youtube.com https://api.bilibili.com https://*.googlevideo.com https://*.bilivideo.com https://*.bilivideo.cn https://upos-hz-mirrorakam.akamaized.net; worker-src 'self'"
   }
 }

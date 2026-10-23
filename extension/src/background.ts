@@ -4,6 +4,9 @@ import { readPlayer } from './page';
 import { readBilibili } from './bilibili';
 import { call, messageError, terminal } from './types';
 import type { Task, PlaybackSession, PageSnapshot, Reply } from './types';
+import { collectionSource, batchEntries } from './batch-core';
+import { readYouTubeCollection, browseYouTube, readBilibiliCollection } from './collections';
+import { createQueue } from './queue';
 
 const extensionOrigin = chrome.runtime.getURL('');
 let creation: Promise<void> | undefined;
@@ -30,11 +33,18 @@ async function reconcile() {
   const values = await tasks();
   const active = await hasOffscreen() ? await call<string[]>('active', {}, 'offscreen').catch(() => []) : [];
   for (const task of values.filter(task => !terminal(task.state))) {
+    if (task.batch && task.state === 'queued') continue;
     if (active.includes(task.id)) continue;
     const item = task.downloadId ? (await chrome.downloads.search({ id: task.downloadId }))[0] : undefined;
     if (item?.state === 'complete') { task.state = 'completed'; continue; }
     if (item?.state === 'in_progress') await chrome.downloads.cancel(item.id).catch(() => {});
     task.state = 'failed'; task.error = '浏览器或扩展已重启，任务中断。请打开视频后重新下载。';
+  }
+  if (values.some(task => task.batch && task.state === 'queued')) await chrome.storage.local.set({ queuePaused: true });
+  for (const task of values.filter(task => task.batch && terminal(task.state))) {
+    const key = `queue-tab-${task.id}`; const tabId = (await chrome.storage.session.get(key))[key];
+    if (typeof tabId === 'number') await chrome.tabs.remove(tabId).catch(() => {});
+    await chrome.storage.session.remove(key);
   }
   // Populate older completed records once on startup. The muxed file size can
   // differ from the received source bytes, so use Chrome's saved-file metadata.
@@ -59,7 +69,7 @@ async function ensureControls(tabId: number) {
   catch { await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); }
 }
 chrome.runtime.onInstalled.addListener(() => {
-  void chrome.tabs.query({ url: ['https://www.youtube.com/*', 'https://m.youtube.com/*', 'https://www.bilibili.com/*', 'https://m.bilibili.com/*', 'https://bilibili.com/*'] }).then(tabs =>
+  void chrome.tabs.query({ url: ['https://www.youtube.com/*', 'https://m.youtube.com/*', 'https://www.bilibili.com/*', 'https://m.bilibili.com/*', 'https://bilibili.com/*', 'https://space.bilibili.com/*'] }).then(tabs =>
     Promise.allSettled(tabs.filter(tab => tab.id !== undefined && !tab.discarded).map(tab => ensureControls(tab.id!))));
 });
 
@@ -121,6 +131,31 @@ async function downloadSource(tabId: number): Promise<PageSnapshot> {
   directSources.set(tabId, { videoId: native.videoId, expires: Date.now() + 5 * 60_000, source });
   return source;
 }
+async function runTask(task: Task, source: PageSnapshot, tabId: number) {
+  await ensureOffscreen();
+  const session = (await chrome.storage.session.get(`playback-${tabId}`))[`playback-${tabId}`] as PlaybackSession | undefined;
+  await call('run', { task, snapshot: source, session }, 'offscreen');
+}
+const queue = createQueue({ serial, tasks, persist, source: downloadSource, run: runTask });
+async function collection(input: unknown, token: unknown) {
+  const source = collectionSource(String(input));
+  if (token !== undefined && (typeof token !== 'string' || token.length > 20000)) throw new Error('分页标识无效。');
+  if (source.site === 'bilibili') {
+    if (token !== undefined && !/^[1-9]\d{0,5}$/.test(String(token))) throw new Error('分页标识无效。');
+    const value = await readBilibiliCollection(source, token ? Number(token) : 1);
+    return { ...value, entries: batchEntries(value.entries) };
+  }
+  const value = await readYouTubeCollection(source.url, token as string | undefined, async (context, continuation) => {
+    const tabs = (await chrome.tabs.query({ url: ['https://www.youtube.com/*', 'https://m.youtube.com/*'] })).filter(tab => tab.id !== undefined && !tab.discarded);
+    const tab = tabs.find(tab => tab.url === source.url) || tabs[0];
+    if (!tab) throw new Error('加载更多需要 YouTube 页面会话，请保持原 YouTube 页面打开后重试。');
+    const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, world: 'MAIN', func: browseYouTube, args: [context, continuation] });
+    if (!result?.result) throw new Error('无法读取下一页，请确认 YouTube 页面已加载后重试。');
+    if (result.result.error) throw new Error(result.result.error);
+    return result.result.data;
+  });
+  return { ...value, entries: batchEntries(value.entries) };
+}
 async function tabFor(sender: chrome.runtime.MessageSender, requested?: unknown) {
   const pageTab = sender.url?.startsWith(extensionOrigin) ? undefined : sender.tab?.id;
   const id = pageTab ?? (typeof requested === 'number' ? requested : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id);
@@ -151,7 +186,7 @@ async function finishDownload(id: number, state: string, error?: string) {
   }
   else if (state === 'interrupted') { task.state = error === 'USER_CANCELED' ? 'cancelled' : 'failed'; task.error = error ? `文件保存中断：${error}` : '文件保存中断。'; }
   else return;
-  await persist(values); await cleanup(task.id);
+  await persist(values); await cleanup(task.id); await queue.settled(task.id);
 }
 chrome.downloads.onChanged.addListener(delta => {
   if (delta.state?.current) void serial(async () => { await initialized; await finishDownload(delta.id, delta.state!.current!, delta.error?.current); });
@@ -163,7 +198,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (data.target !== 'background' || typeof data.type !== 'string') return;
   const internal = sender.url?.startsWith(extensionOrigin) === true;
   const executor = sender.url === chrome.runtime.getURL('offscreen.html');
-  const allowed = internal || (sender.url && /^https:\/\/(?:(?:www|m)\.youtube\.com|(?:(?:www|m)\.)?bilibili\.com)\//.test(sender.url));
+  const allowed = internal || (sender.url && /^https:\/\/(?:(?:www|m)\.youtube\.com|(?:(?:www|m|space)\.)?bilibili\.com)\//.test(sender.url));
   if (!allowed) return;
   const execute = async () => {
     await initialized;
@@ -175,6 +210,15 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
       return choices(await downloadSource(tabId));
     }
     if (data.type === 'list') return tasks();
+    if (data.type === 'batch-open') {
+      const source = collectionSource(String(data.url));
+      if (!internal && collectionSource((await chrome.tabs.get(await tabFor(sender))).url || '').url !== source.url) throw new Error('列表页面已切换，请重试。');
+      await chrome.tabs.create({ url: chrome.runtime.getURL(`batch.html?source=${encodeURIComponent(source.url)}`) }); return null;
+    }
+    if (data.type === 'collection' && internal) return collection(data.url, data.continuation);
+    if (data.type === 'enqueue' && internal) return queue.enqueue(data.entries, data.quality);
+    if (data.type === 'queue-control' && internal) return queue.control(data.action);
+    if (data.type === 'retry' && internal) return queue.retry(data.id);
     if (data.type === 'open' && internal) {
       const target = videoTarget(String(data.url)); await chrome.tabs.create({ url: target.url }); return null;
     }
@@ -190,9 +234,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         const task: Task = { id: crypto.randomUUID(), site: source.site || 'youtube', videoId: source.videoId, title: source.title, choice, state: 'queued', created: Date.now(), received: 0 };
         values.unshift(task); await persist(values);
         try {
-          await ensureOffscreen();
-          const session = (await chrome.storage.session.get(`playback-${tabId}`))[`playback-${tabId}`] as PlaybackSession | undefined;
-          await call('run', { task, snapshot: source, session }, 'offscreen');
+          await runTask(task, source, tabId);
         } catch (error) { task.state = 'failed'; task.error = messageError(error); await persist(values); throw error; }
         return task;
       }
@@ -202,7 +244,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         if (terminal(task.state)) return null;
         task.state = 'cancelled'; await persist(values);
         if (task.downloadId !== undefined) await chrome.downloads.cancel(task.downloadId).catch(() => {});
-        await cleanup(task.id); return null;
+        await cleanup(task.id); await queue.settled(task.id); return null;
       }
       if (!executor) throw new Error('无效的内部任务消息。');
       if (terminal(task.state)) return null;
@@ -214,6 +256,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
       } else if (data.type === 'failure') {
         task.state = 'failed'; task.error = String(data.error).slice(0, 500);
         for (const [tabId, cached] of directSources) if (cached.videoId === task.videoId) directSources.delete(tabId);
+        await persist(values); await cleanup(task.id); await queue.settled(task.id); return null;
       }
       else if (data.type === 'save') {
         if (typeof data.blob !== 'string' || !data.blob.startsWith(`blob:${extensionOrigin}`)) throw new Error('无效的文件地址。');

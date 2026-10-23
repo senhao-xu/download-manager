@@ -1,5 +1,6 @@
 import { videoTarget } from './core';
-import { createWidget } from './widget';
+import { createWidget, createCollectionWidget } from './widget';
+import { collectionSource } from './batch-core';
 
 // Reuse the isolated-world controller when the popup recovers an already open tab.
 const page = window as Window & { ytLocalDownload?: { mount(): void; valid(): boolean; destroy(): void } };
@@ -10,7 +11,7 @@ if (page.ytLocalDownload?.valid()) page.ytLocalDownload.mount();
 else {
   page.ytLocalDownload?.destroy();
   document.querySelector('#yt-local-download-root')?.remove();
-  let currentId = ''; let host: HTMLElement | undefined; let widget: ReturnType<typeof createWidget> | undefined;
+  let currentId = ''; let host: HTMLElement | undefined; let widget: Pick<ReturnType<typeof createWidget>, 'setHidden' | 'destroy'> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let observedHost: HTMLElement | undefined; let observedToolbar: HTMLElement | undefined;
   let stopped = false;
@@ -26,12 +27,28 @@ else {
   function mount() {
     timer = undefined;
     if (!valid()) { destroy(); return; }
-    let id = ''; let site = ''; try { const target = videoTarget(location.href); id = target.videoId; site = target.site; } catch { /* Not a single-video page. */ }
+    let id = ''; let site = ''; let collectionUrl = '';
+    try { const target = videoTarget(location.href); id = target.videoId; site = target.site; }
+    catch {
+      try { const source = collectionSource(location.href); collectionUrl = source.url; id = `collection:${source.url}`; site = source.site; }
+      catch { /* Not a supported video, collection or channel page. */ }
+    }
     if (currentId !== id) {
       widget?.destroy(); widget = undefined; host = undefined; currentId = id;
       resize.disconnect(); observedHost = undefined; observedToolbar = undefined;
     }
     if (!id) return;
+    if (collectionUrl) {
+      if (!host || !widget) {
+        host = document.createElement('span'); host.id = 'yt-local-download-root';
+        widget = createCollectionWidget(host, collectionUrl);
+      }
+      host.toggleAttribute('data-dark', document.documentElement.hasAttribute('dark'));
+      host.setAttribute('data-floating', '');
+      if (host.parentElement !== document.body) document.body.append(host);
+      syncFullscreen();
+      return;
+    }
     const selectors = site === 'bilibili' ? ['.video-toolbar-container', '#arc_toolbar_report'] : location.pathname.startsWith('/shorts/')
       ? ['ytd-reel-video-renderer[is-active] #actions']
       : ['ytd-watch-metadata #top-level-buttons-computed', '#menu-container #top-level-buttons-computed', 'ytm-slim-video-action-bar-renderer', 'ytd-watch-metadata #actions-inner', 'ytd-watch-metadata #actions', '#watch-header #actions'];

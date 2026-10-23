@@ -24,9 +24,11 @@ An independent [Chrome / Edge extension](extension/README.md) adds a quality men
 below YouTube and Bilibili videos and downloads/muxes media inside the browser. It needs no
 application backend or native helper. Install the built directory through
 “Load unpacked” in the browser's extension manager.
-Version 0.2.0 adds ordinary Bilibili BV/AV videos and the current part, available quality selection, MP4 and original M4A audio export. Both sites share progress, cancellation, local history, up to four concurrent range requests and verified media filenames. YouTube playlists/channels and Bilibili multipart/collection batches are not supported by the extension.
+Version 0.2.0 adds ordinary Bilibili BV/AV videos and the current part, available quality selection, MP4 and original M4A audio export. Both sites share progress, cancellation, local history, up to four concurrent range requests and verified media filenames.
 Version 0.2.1 moves the Bilibili download control to the right of the action row and fixes missing native sidebar images, avatars and header content after page reload.
 Version 0.2.2 hides the on-page control and closes its quality menu in video fullscreen or Bilibili web fullscreen, restoring it on exit.
+Version 0.3.0 fixes Shorts player detection and adds a batch manager for YouTube playlists/channel Videos and Shorts, Bilibili collections/series and multipart videos, with selection, pagination, quality preferences and a persistent sequential queue.
+Version 0.3.1 adds on-page batch buttons on playlists/channels/collections and removes automatic tab creation from list reading and pagination; YouTube pagination reuses an already open YouTube page.
 
 The extension reuses the site's normal page login state; no cookie export is needed.
 A full public Bilibili 480P H.264/AAC MP4 (about 212 seconds) has been verified; real logged-in/premium-account quality remains unverified.

@@ -1,6 +1,10 @@
 import type { ClientInfo } from 'googlevideo/protos';
 
 export type Site = 'youtube' | 'bilibili';
+export type BatchQuality = 'best' | '1080' | '720' | 'audio';
+export interface BatchEntry { videoId: string; title: string; url: string }
+export interface CollectionSource { site: Site; kind: 'playlist' | 'channel' | 'video' | 'season' | 'series'; url: string; id: string; owner?: string }
+export interface CollectionPage { title: string; entries: BatchEntry[]; continuation?: string }
 export interface VideoTarget { site: Site; videoId: string; url: string; identity: string; part: number }
 export interface RawFormat {
   itag: number; mimeType: string; bitrate: number;
@@ -24,7 +28,7 @@ export interface PlaybackSession {
 }
 export interface Choice {
   id: string; videoItag?: number; audioItag?: number;
-  label: string; fps?: number; container: 'mp4' | 'webm' | 'm4a'; estimatedBytes?: number;
+  label: string; height?: number; fps?: number; container: 'mp4' | 'webm' | 'm4a'; estimatedBytes?: number;
 }
 export interface VideoInfo { site?: Site; videoId: string; title: string; duration: number; choices: Choice[] }
 export type TaskState = 'queued' | 'resolving' | 'downloading' | 'merging' | 'saving' | 'completed' | 'failed' | 'cancelled';
@@ -32,6 +36,7 @@ export interface Task {
   site?: Site;
   id: string; videoId: string; title: string; choice: Choice; state: TaskState;
   created: number; received: number; total?: number; error?: string; downloadId?: number; filename?: string; fileSize?: number;
+  batch?: { url: string; quality: BatchQuality };
 }
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string };
 export const terminal = (state: TaskState) => ['completed', 'failed', 'cancelled'].includes(state);

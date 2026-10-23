@@ -9,8 +9,18 @@ export async function readPlayer(expectedId: string, direct = false): Promise<Pa
     playerConfig?: { mediaCommonConfig?: { mediaUstreamerRequestConfig?: { videoPlaybackUstreamerConfig?: string } } };
   };
   const page = window as Window & { ytInitialPlayerResponse?: PlayerResponse; ytcfg?: { get(key: string): unknown } };
-  const player = document.querySelector('#movie_player') as (Element & { getPlayerResponse?(): PlayerResponse }) | null;
-  let response = player?.getPlayerResponse?.();
+  // Shorts use shorts-player and retain/preload other players while scrolling.
+  // A watch player or the initial document response may belong to an old video.
+  const players = document.querySelectorAll<Element & { getPlayerResponse?(): PlayerResponse }>(
+    'ytd-reel-video-renderer[is-active] .html5-video-player, #shorts-player, #movie_player, .html5-video-player',
+  );
+  let response: PlayerResponse | undefined;
+  for (const player of players) {
+    try {
+      const value = player.getPlayerResponse?.();
+      if (value?.videoDetails?.videoId === expectedId) { response = value; break; }
+    } catch { /* A detached or not-yet-ready player must not hide the active one. */ }
+  }
   if (response?.videoDetails?.videoId !== expectedId) response = page.ytInitialPlayerResponse;
   if (response?.videoDetails?.videoId !== expectedId) {
     return { videoId: expectedId, title: document.title, duration: 0, status: 'UNAVAILABLE', reason: response?.playabilityStatus?.reason || '视频正在加载，请先播放几秒后重试。', live: false, formats: [], client: {} };

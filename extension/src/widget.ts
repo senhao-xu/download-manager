@@ -14,6 +14,21 @@ const styles = `
 .menu{inset:unset;margin:0;border:1px solid var(--line);border-radius:14px;padding:0;background:var(--bg);color:var(--fg);width:340px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow-y:auto;box-shadow:0 6px 24px #0003;font:400 14px/1.5 Roboto,Arial,"Microsoft YaHei",sans-serif}.heading{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;gap:10px}.heading strong{font-weight:500}.quiet{color:var(--sub);font-size:12px}.refresh{border:0;background:transparent;color:var(--sub);padding:4px 0}.options{max-height:350px;overflow-y:auto}.option{width:100%;display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:center;text-align:left;padding:10px 16px;background:transparent;border:0;font-weight:400}.option:hover,.option[aria-pressed=true]{background:var(--soft)}.check{visibility:hidden}.option[aria-pressed=true] .check{visibility:visible}.detail{display:block;font-size:12px;color:var(--sub);margin-top:1px}.foot{padding:10px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--sub)}.notice{padding:12px 16px;color:var(--sub);overflow-wrap:anywhere;font-weight:400}.notice:empty{display:none}.status{display:none;padding:10px 16px;border-top:1px solid var(--line);font-weight:400}.status.visible{display:block}.status-line{display:flex;justify-content:space-between;gap:12px;align-items:center}.cancel{border:0;background:transparent;color:var(--fg);padding:3px 0;text-decoration:underline;white-space:nowrap}progress{display:block;width:100%;height:5px;margin:10px 0 2px;accent-color:var(--fg);border:0}.task-error{font-size:12px;color:var(--sub);margin-top:5px;overflow-wrap:anywhere}.task-error:empty{display:none}.video-title{font-weight:500;padding:0 16px 10px;overflow-wrap:anywhere}.video-title:empty{display:none}
 `;
 
+export function createCollectionWidget(host: HTMLElement, url: string) {
+  const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = `<style>${styles}.main{border-radius:24px}.notice{position:absolute;right:0;bottom:48px;width:280px;border:1px solid var(--line);border-radius:10px;background:var(--bg);box-shadow:0 4px 16px #0002}</style><div class="split"><button type="button" class="main" aria-label="批量下载此列表">↓ 批量下载</button></div><div class="notice" role="alert" hidden></div>`;
+  const button = root.querySelector<HTMLButtonElement>('button')!;
+  const notice = root.querySelector<HTMLDivElement>('.notice')!;
+  let disposed = false;
+  button.addEventListener('click', async () => {
+    button.disabled = true; notice.hidden = true;
+    try { await call('batch-open', { url }); }
+    catch (error) { if (!disposed) { notice.textContent = messageError(error); notice.hidden = false; } }
+    finally { if (!disposed) button.disabled = false; }
+  });
+  return { setHidden(hidden: boolean) { host.hidden = hidden; if (hidden) notice.hidden = true; }, destroy() { disposed = true; host.remove(); } };
+}
+
 export function createWidget(host: HTMLElement, tabId?: number) {
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${styles}</style><div class="split"><button type="button" class="main" aria-label="下载当前视频">↓ <span>下载</span></button><button type="button" class="toggle" aria-label="选择下载清晰度" aria-expanded="false">▾</button><progress class="inline-progress" max="100" aria-label="下载进度" hidden></progress></div><div class="menu" popover="auto"><div class="heading"><strong>下载到本机</strong><button type="button" class="refresh">刷新格式</button></div><div class="video-title"></div><div class="notice" role="status"></div><div class="options" role="group" aria-label="可用下载清晰度"></div><div class="status"><div class="status-line"><span class="task-label"></span><button type="button" class="cancel">取消</button></div><progress max="100" aria-label="任务进度"></progress><div class="task-error"></div></div><div class="foot">视频选项包含声音，自动合并为一个文件</div></div>`;

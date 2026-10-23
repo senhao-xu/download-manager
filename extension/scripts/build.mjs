@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist', { recursive: true });
 await cp('public', 'dist', { recursive: true });
-for (const name of ['background', 'offscreen', 'engine', 'content', 'popup']) {
+for (const name of ['background', 'offscreen', 'engine', 'content', 'popup', 'batch']) {
   await build({ entryPoints: [`src/${name}.ts`], outfile: `dist/${name}.js`, bundle: true, format: name === 'content' ? 'iife' : 'esm', platform: 'browser', target: 'chrome120', minify: true, legalComments: 'eof', conditions: ['browser'], logLevel: 'warning' });
 }
 const variant = dirname(require.resolve('@jitl/quickjs-wasmfile-release-sync/package.json'));

@@ -99,7 +99,7 @@ export function choices(snapshot: PageSnapshot): VideoInfo {
     // Keep one compatible codec pair per resolution, frame rate and container.
     const label = snapshot.site === 'bilibili' && format.qualityLabel || `${format.height}p`;
     if (list.some(choice => choice.label === label && choice.fps === format.fps && choice.container === container)) continue;
-    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
+    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label, height: format.height, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
   }
   for (const webm of [false, true]) {
     const format = bestAudio(webm);

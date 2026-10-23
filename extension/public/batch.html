@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>批量下载 · YouTube / Bilibili</title><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="batch.css"></head>
+<body>
+  <header><img class="mark" src="icons/icon128.png" width="38" height="38" alt=""><div><h1>批量下载</h1><p>YouTube 播放列表 / 频道 · Bilibili 合集 / 分 P</p></div><span id="version" class="muted"></span></header>
+  <main class="workspace">
+    <section class="card" aria-label="选择视频">
+      <h2>添加视频</h2>
+      <form id="source-form"><label for="source-url">播放列表、频道或合集链接</label><div class="input-row"><input id="source-url" type="url" required placeholder="粘贴列表链接，Bilibili 也可粘贴合集中的视频链接"><button id="read" class="secondary" type="submit">读取列表</button></div></form>
+      <p class="muted">YouTube 频道可使用 /videos 或 /shorts 链接。列表按页读取，可继续加载后再选择。</p>
+      <p id="source-status" role="status" aria-live="polite"></p>
+      <div id="selection" hidden>
+        <div class="section-head"><h2 id="source-title"></h2><span id="selection-count" class="muted"></span></div>
+        <div class="selection-actions"><button id="select-all" class="text-button" type="button">全选已加载</button><button id="select-none" class="text-button" type="button">取消全选</button></div>
+        <div id="entries" class="entries"></div>
+        <button id="more" class="text-button" type="button" hidden>加载更多</button>
+        <label for="batch-quality">统一下载画质</label><select id="batch-quality"><option value="best">每个视频的最高可用画质（含声音）</option><option value="1080">不超过 1080p（含声音）</option><option value="720">不超过 720p（含声音）</option><option value="audio">仅音频（原始音质）</option></select>
+        <p class="muted">按各视频实际可用格式选择；无符合格式或无法访问的条目会显示失败，并继续下一项。</p>
+        <button id="enqueue" class="primary" type="button">加入下载队列</button>
+      </div>
+      <p id="error" role="alert"></p>
+    </section>
+    <section class="card" aria-label="下载队列">
+      <div class="section-head"><h2>下载队列</h2><span id="queue-count" class="muted"></span></div>
+      <p id="queue-state" class="muted" role="status"></p>
+      <div class="queue-actions"><button id="pause" class="secondary" type="button">暂停后续</button><button id="resume" class="secondary" type="button">继续队列</button><button id="clear" class="text-button" type="button">取消等待项</button></div>
+      <p class="muted">逐个下载。关闭此页面后继续；请保持浏览器运行。重启浏览器后可点击「继续队列」。</p>
+      <div id="queue"></div>
+    </section>
+  </main>
+  <footer>文件保存至浏览器下载目录 · 同名文件自动编号</footer>
+  <script type="module" src="batch.js"></script>
+</body></html>

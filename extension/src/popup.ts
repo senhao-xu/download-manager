@@ -2,6 +2,7 @@ import { call, messageError, terminal } from './types';
 import type { Choice, Task, VideoInfo } from './types';
 import { labels } from './widget';
 import { bytes, videoTarget, defaultChoice, progressPercent, taskSize } from './core';
+import { collectionSource } from './batch-core';
 
 const get = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const error = get<HTMLParagraphElement>('#error');
@@ -13,6 +14,14 @@ const refresh = get<HTMLButtonElement>('#refresh');
 get('#version').textContent = `版本 ${chrome.runtime.getManifest().version}`;
 let tabId: number | undefined; let info: VideoInfo | undefined; let selected: Choice | undefined;
 let tasks: Task[] = []; let busy = false;
+get('#batch-open').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let query = '';
+    try { query = `?source=${encodeURIComponent(collectionSource(tab?.url || '').url)}`; } catch { /* The manager also accepts a pasted list URL. */ }
+    await chrome.tabs.create({ url: chrome.runtime.getURL(`batch.html${query}`) }); window.close();
+  } catch (value) { error.textContent = messageError(value); }
+});
 
 function renderCurrent() {
   const task = tasks.find(value => value.videoId === info?.videoId);

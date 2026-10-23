@@ -8,14 +8,28 @@
 1. 解压构建好的 ZIP。
 2. 打开 `chrome://extensions`（Edge 使用 `edge://extensions`），启用“开发者模式”。
 3. 选择“加载已解压的扩展”，选中包含 `manifest.json` 的目录。
-4. 打开 YouTube 或 Bilibili 普通视频，在视频操作栏点击下载按钮；右侧箭头可选择清晰度。YouTube 若未读取到格式，请先播放几秒。
+4. 打开 YouTube（含 Shorts）或 Bilibili 普通视频，在页面点击下载按钮；右侧箭头可选择清晰度。YouTube 若未读取到格式，请先播放几秒。
 5. 也可以点击浏览器工具栏的扩展图标，在弹窗中直接选择清晰度并下载。
 
 ## 从旧版更新
 
-解压 0.2.2 ZIP 并覆盖原扩展目录，在扩展管理页点击该扩展的“重新加载”，
+解压 0.3.1 ZIP 并覆盖原扩展目录，在扩展管理页点击该扩展的“重新加载”，
 然后刷新一次已打开的 YouTube / Bilibili 页面。从 0.1.x 升级会新增 Bilibili 站点和媒体服务器访问权限；若浏览器要求确认新增权限，确认后再重新加载。
-若换了目录，请移除旧扩展并加载新的目录，避免同时启用两份。更新后打开工具栏弹窗，页脚应显示“版本 0.2.2”。
+若换了目录，请移除旧扩展并加载新的目录，避免同时启用两份。更新后打开工具栏弹窗，页脚应显示“版本 0.3.1”。
+
+0.3.1 读取列表和“加载更多”不再自动打开、关闭标签页。YouTube 首页数据通过扩展请求读取，分页复用已打开 YouTube 页面的正常会话，请保留原页面打开。YouTube 播放列表、频道及 Bilibili 合集页面右下角新增“批量下载”按钮，点击直接带入当前列表。为显示 Bilibili 合集页面按钮，新增 `space.bilibili.com` 页面访问权限；更新时若浏览器要求确认，请确认后重新加载并刷新页面。
+
+0.3.0 修复 Shorts 使用独立播放器时无法读取清晰度的问题，并校验当前视频 ID，避免滑动后读取旧视频。新增 YouTube 播放列表、频道 Videos/Shorts、Bilibili 合集及多 P 的批量下载。工具栏弹窗可打开独立批量管理页面，勾选视频、加载更多、选择统一画质并查看队列。
+
+## 批量下载
+
+1. 在 YouTube 播放列表、频道或 Bilibili 合集页面右下角点击“批量下载”，直接打开当前列表。也可在扩展弹窗点击“播放列表 / 频道 / 合集批量下载”，或粘贴链接。
+2. 支持 YouTube `playlist?list=…`、带 `list` 的播放页、频道主页或 `/videos`、`/shorts`；Bilibili `space.bilibili.com/用户ID/lists/列表ID` 合集/系列链接，或合集中的 BV/AV 视频。普通多 P 视频会列出其分 P。
+3. 逐页“加载更多”，全选已加载或勾选部分视频。读取和分页不会新建或跳转标签页；YouTube 分页需要保留任一 YouTube 页面打开。频道 Videos 和 Shorts 分别用对应链接读取；每次最多选择 1000 项。
+4. 选择最高可用画质、不超过 1080p/720p 或仅音频，然后加入队列。每项以实际可用格式为准，视频选项包含声音。
+5. 所有任务逐个下载；失败项显示原因并继续下一项，可单独重试。可取消当前或等待项，暂停后续或取消所有等待项。
+
+关闭弹窗或批量页面后继续下载；队列会打开静音后台视频标签页获取当前播放信息，任务结束后自动关闭。请保持浏览器运行并允许对应站点访问。重启浏览器或扩展后，已中断任务显示失败、等待项保留，点击“继续队列”后继续等待项。最近保留 50 个已结束任务。队列只保存视频链接、画质偏好和进度，不保存签名下载地址或播放令牌。
 
 0.2.2 在视频全屏或 Bilibili 网页全屏时自动隐藏页面下载按钮、收起清晰度菜单，退出全屏后恢复。进行中的下载继续运行。
 
@@ -58,7 +72,7 @@ npm ci
 npm run package
 ```
 
-生成 `dist/` 和 `artifacts/video-local-downloader-0.2.2.zip`。
+生成 `dist/` 和 `artifacts/video-local-downloader-0.3.1.zip`。
 
 图标源文件为 `assets/icon.svg`，PNG 已包含在源码中。修改图标后运行 `npm run icons` 重新生成尺寸；该开发命令使用 Playwright Chromium，普通构建和最终用户无需运行。
 
@@ -69,7 +83,7 @@ npm run package
 - Bilibili 普通 BV/AV 投稿视频及链接 `?p=N` 对应的当前分 P；支持 MP4 音画合并和 M4A 原始音频导出。
 - 可粘贴 YouTube 单视频链接、`youtu.be` 链接及 Bilibili 完整视频链接；B 站短链请先在浏览器打开后使用视频页面。
 - MP4 / WebM 音画合并，音频原格式导出，任务进度与取消，本地最近记录。
-- 暂不支持 YouTube 播放列表/频道批量、Bilibili 多 P/合集批量、番剧、互动视频、正在直播的视频、DRM 内容或 MP3 转码。
+- 支持 YouTube 播放列表及频道 Videos/Shorts、Bilibili 合集/系列和多 P 批量下载；番剧、互动视频、正在直播的视频、DRM 内容或 MP3 转码暂不支持。
 - Bilibili 画质取决于视频源和当前账号的正常播放权限，登录或大会员专属画质仅在接口实际提供时显示；试看内容会停止并提示。
 - 同时处理一个任务，关闭弹窗后继续下载；关闭浏览器会中断任务，可重新开始。
 - 对长度已知的直接音视频地址，最多同时下载 4 个分片，音频和视频共享并发上限；长度未知时流式顺序传输。SABR 回退继续使用原播放协议。速度取决于 YouTube 和网络，无法保证提速倍数。
@@ -109,4 +123,7 @@ npm run test:extension
 
 ```sh
 BILIBILI_TEST_URL='https://www.bilibili.com/video/BV1GJ411x7h7/' node scripts/live-smoke.mjs
+YOUTUBE_TEST_URL='https://www.youtube.com/shorts/视频ID' node scripts/live-smoke.mjs
+node scripts/live-batch-smoke.mjs
+node scripts/live-collections-smoke.mjs
 ```
