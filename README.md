@@ -18,6 +18,19 @@ BitTorrent (magnet / .torrent). Paste a URL, pick options, download.
 - **Theme & language**: dark/light/system theme toggle and 中文/English toggle (top-right);
   choices are remembered.
 
+## YouTube browser extension
+
+An independent [Chrome / Edge extension](extension/README.md) adds a quality menu
+below YouTube videos and downloads/muxes media inside the browser. It needs no
+application backend or native helper. Install the built directory through
+“Load unpacked” in the browser's extension manager.
+Version 0.1.4 adds up to four concurrent range requests, checks final media filenames, and keeps inline download progress visible.
+
+The extension reuses the YouTube page's login state; no cookie export is needed.
+Version 0.1.2 has completed a public 1080p test clip and a full 2160p MP4 with
+audio from a roughly 13-minute video. Availability still depends on YouTube's
+responses. See the extension README for setup and scope.
+
 ## Quick start (Docker)
 
 Pre-built image on GHCR:

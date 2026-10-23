@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube 本机下载</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header><span class="mark" aria-hidden="true">↓</span><div><h1>YouTube 本机下载</h1><p>选好清晰度，直接保存到电脑</p></div></header>
+  <main>
+    <section id="current" class="card" aria-label="当前视频" aria-busy="true">
+      <div class="section-head"><span class="eyebrow">当前视频</span><button id="refresh" class="text-button" type="button">重新读取</button></div>
+      <h2 id="video-title">正在读取当前视频…</h2>
+      <p id="video-meta" class="muted"></p>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <div id="download-controls" hidden>
+        <label for="quality">下载清晰度</label>
+        <select id="quality" aria-describedby="format-hint"></select>
+        <p id="format-hint" class="muted"></p>
+        <button id="download" class="primary" type="button" disabled>↓ <span>下载到电脑</span></button>
+      </div>
+      <div id="task" hidden aria-live="polite">
+        <div class="task-line"><span id="task-label"></span><button id="cancel" class="text-button" type="button">取消下载</button></div>
+        <progress id="progress" max="100" aria-label="下载进度"></progress>
+        <p id="task-error" class="muted"></p>
+      </div>
+    </section>
+    <details id="link-entry"><summary>通过链接打开其他视频</summary><form><label for="url">YouTube 视频链接</label><div class="input-row"><input id="url" type="url" placeholder="粘贴 youtube.com 或 youtu.be 链接" required><button class="secondary" type="submit">打开</button></div></form></details>
+    <p id="error" role="alert"></p>
+    <section aria-label="最近下载"><div class="section-head history-head"><h2>最近下载</h2><span id="history-count" class="muted"></span></div><div id="history"><p class="empty">还没有下载记录</p></div></section>
+  </main>
+  <footer>关闭此弹窗，下载仍会继续 · <span id="version"></span></footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

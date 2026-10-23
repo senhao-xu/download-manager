@@ -1,0 +1,27 @@
+{
+  "name": "youtube-local-downloader",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:extension": "node --import tsx --test tests/browser/*.test.ts",
+    "package": "npm run build && python3 scripts/package.py"
+  },
+  "dependencies": {
+    "googlevideo": "4.1.1",
+    "mediabunny": "1.62.1",
+    "quickjs-emscripten-core": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "youtubei.js": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.1.32",
+    "@types/node": "22.19.15",
+    "esbuild": "0.25.12",
+    "playwright": "1.62.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

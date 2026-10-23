@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube 本机下载",
+  "version": "0.1.4",
+  "description": "在 YouTube 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "downloads",
+    "offscreen",
+    "scripting",
+    "activeTab",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://*.googlevideo.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YouTube 本机下载"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://www.youtube.com https://m.youtube.com https://*.googlevideo.com; worker-src 'self'"
+  }
+}
