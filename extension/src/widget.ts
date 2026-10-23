@@ -23,6 +23,9 @@ export function createWidget(host: HTMLElement, tabId?: number) {
   toggle.popoverTargetElement = menu;
   const options = get<HTMLDivElement>('.options'); const title = get<HTMLDivElement>('.video-title');
   let info: VideoInfo | undefined; let selected: Choice | undefined; let busy = false; let disposed = false; let task: Task | undefined;
+  let loading: Promise<void> | undefined; let loadError = '';
+  const retryDelays = [1000, 2000, 4000, 8000];
+  let retryAttempt = 0; let retryTimer: ReturnType<typeof setTimeout> | undefined;
   function position() {
     const rect = host.getBoundingClientRect();
     menu.style.left = `${Math.max(12, Math.min(rect.right - 340, window.innerWidth - Math.min(340, window.innerWidth - 24) - 12))}px`;
@@ -59,8 +62,14 @@ export function createWidget(host: HTMLElement, tabId?: number) {
     const percent = task && progressPercent(task);
     const phase = task ? `${labels[task.state]}${task.state === 'downloading' && percent !== undefined ? ` ${percent}%` : ''}` : '';
     main.disabled = busy || !!active;
-    main.querySelector('span')!.textContent = active ? phase : busy ? '正在准备…' : selected ? `${task?.state === 'failed' ? '重试下载' : '下载'} ${selected.videoItag ? selected.label : '音频'}` : '下载';
-    main.title = task?.error || '';
+    let label = '下载';
+    if (active) label = phase;
+    else if (loading) label = '读取清晰度…';
+    else if (busy) label = '正在准备…';
+    else if (selected) label = `${task?.state === 'failed' ? '重试下载' : '下载'} ${selected.videoItag ? selected.label : '音频'}`;
+    else if (loadError) label = retryTimer !== undefined ? '正在重试清晰度…' : '重试获取清晰度';
+    main.querySelector('span')!.textContent = label;
+    main.title = task?.error || loadError;
     for (const progress of root.querySelectorAll<HTMLProgressElement>('progress')) {
       progress.hidden = !active;
       if (percent !== undefined && task?.state === 'downloading') progress.value = percent; else progress.removeAttribute('value');
@@ -72,18 +81,35 @@ export function createWidget(host: HTMLElement, tabId?: number) {
     get<HTMLButtonElement>('.cancel').hidden = !active;
     get('.task-error').textContent = task.error || '';
   }
-  async function load() {
-    if (busy) return;
-    busy = true; notice.textContent = '正在读取视频和清晰度…'; renderTask();
-    try {
-      const value = await call<VideoInfo>('info', { tabId });
-      if (disposed) return;
-      info = value; title.textContent = value.title;
-      selected = defaultChoice(value);
-      notice.textContent = ''; renderChoices();
-      await updateTasks();
-    } catch (error) { if (!disposed) { info = undefined; selected = undefined; options.replaceChildren(); notice.textContent = messageError(error); } }
-    finally { busy = false; if (!disposed) { renderTask(); if (menu.matches(':popover-open')) position(); } }
+  function load(automatic = false): Promise<void> {
+    if (disposed) return Promise.resolve();
+    if (loading) return loading;
+    if (busy) return Promise.resolve();
+    clearTimeout(retryTimer); retryTimer = undefined;
+    if (!automatic) retryAttempt = 0;
+    busy = true; loadError = ''; notice.textContent = '正在读取视频和清晰度…';
+    loading = (async () => {
+      try {
+        const value = await call<VideoInfo>('info', { tabId });
+        if (disposed) return;
+        info = value; title.textContent = value.title;
+        selected = defaultChoice(value); retryAttempt = 0;
+        notice.textContent = ''; renderChoices();
+        await updateTasks();
+      } catch (error) {
+        if (disposed) return;
+        info = undefined; selected = undefined; options.replaceChildren();
+        loadError = messageError(error); notice.textContent = loadError;
+        if (retryAttempt < retryDelays.length) {
+          retryTimer = setTimeout(() => { retryTimer = undefined; void load(true); }, retryDelays[retryAttempt++]);
+        }
+      } finally {
+        loading = undefined; busy = false;
+        if (!disposed) { renderTask(); if (menu.matches(':popover-open')) position(); }
+      }
+    })();
+    renderTask();
+    return loading;
   }
   async function updateTasks() {
     try {
@@ -108,11 +134,18 @@ export function createWidget(host: HTMLElement, tabId?: number) {
   });
   const storageChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'local' && changes.tasks) void updateTasks(); };
   chrome.storage.onChanged.addListener(storageChange);
+  // The player can become ready after content injection or an SPA navigation.
+  // Readiness may recover even after the finite automatic retry budget is spent.
+  const playerReady = (event: Event) => { if (event.target instanceof HTMLVideoElement && !info) void load(true); };
+  document.addEventListener('loadedmetadata', playerReady, true);
+  document.addEventListener('playing', playerReady, true);
   const reposition = () => { if (menu.matches(':popover-open')) position(); };
   window.addEventListener('resize', reposition); window.addEventListener('scroll', reposition, true);
   void load();
   return { load, open, destroy() {
-    disposed = true; window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); host.remove();
+    disposed = true; clearTimeout(retryTimer);
+    document.removeEventListener('loadedmetadata', playerReady, true); document.removeEventListener('playing', playerReady, true);
+    window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); host.remove();
     try { chrome.storage.onChanged.removeListener(storageChange); } catch { /* Also clean up DOM listeners after an extension update invalidates its API context. */ }
   } };
 }

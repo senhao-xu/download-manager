@@ -59,7 +59,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   const observed: string[] = [];
   context.on('request', request => observed.push(request.url()));
   const response = { videoDetails: { videoId: raw.videoId, title: raw.title, lengthSeconds: '8' }, playabilityStatus: { status: 'OK' }, streamingData: { adaptiveFormats: raw.formats } };
-  let sabrOnly = false; let playerRequests = 0;
+  let sabrOnly = false; let playerRequests = 0; let fixtureReady = false;
   await context.route('https://www.youtube.com/**', route => {
     if (new URL(route.request().url()).pathname === '/youtubei/v1/player') {
       playerRequests++;
@@ -69,7 +69,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) });
     }
     const native = sabrOnly ? { ...response, streamingData: { serverAbrStreamingUrl: 'https://fixture.googlevideo.com/videoplayback?id=sabr-only', adaptiveFormats: raw.formats.map(({ url, ...format }) => format) } } : response;
-    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<html><head><meta charset="utf-8"></head><body><div id="movie_player"></div><ytd-watch-metadata><div id="top-level-buttons-computed"></div></ytd-watch-metadata><script>window.ytInitialPlayerResponse=${JSON.stringify(native)};</script></body></html>` });
+    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<html><head><meta charset="utf-8"></head><body><div id="movie_player"></div><ytd-watch-metadata><div id="top-level-buttons-computed"></div></ytd-watch-metadata><script>window.ytInitialPlayerResponse=${fixtureReady ? JSON.stringify(native) : 'undefined'};window.fixtureReads=0;document.querySelector('#movie_player').getPlayerResponse=()=>{window.fixtureReads++;return window.ytInitialPlayerResponse;};</script></body></html>` });
   });
   const page = await context.newPage();
   await page.goto(`https://www.youtube.com/watch?v=${raw.videoId}`);
@@ -83,6 +83,13 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   await installer.detach();
   const inline = page.locator('#yt-local-download-root');
+  // Installation precedes player readiness. A delayed response must update
+  // quality automatically, without opening the menu or receiving media events.
+  await inline.locator('.main').filter({ hasText: '正在重试清晰度' }).waitFor();
+  await page.evaluate(value => { (window as Window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse = value; }, response);
+  fixtureReady = true;
+  await inline.locator('.main:not([disabled])').filter({ hasText: '下载 90p' }).waitFor();
+  assert.equal(await inline.locator('.menu:popover-open').count(), 0);
   await inline.getByRole('button', { name: '选择下载清晰度' }).click();
   await inline.locator('.option').filter({ hasText: '90p' }).waitFor();
   assert.equal(await page.locator('#yt-local-download-root').count(), 1);
@@ -312,6 +319,42 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
     await page.waitForTimeout(100);
   }
   assert.equal(firstClick?.state, 'completed', firstClick?.error);
+  assert.equal(await inline.locator('.menu:popover-open').count(), 0);
+  // Exhaust automatic retries on an unavailable SPA player. They stop, expose
+  // a retry action/error, and can still recover on a later media-ready event.
+  await page.evaluate(() => { history.pushState({}, '', '/watch?v=fixture_007'); document.dispatchEvent(new Event('yt-navigate-finish')); });
+  await inline.locator('.main').filter({ hasText: '重试获取清晰度' }).waitFor({ timeout: 20000 });
+  assert.match(await inline.locator('.main').getAttribute('title') || '', /正在加载/);
+  const reads = () => page.evaluate(() => (window as Window & { fixtureReads?: number }).fixtureReads || 0);
+  const exhaustedReads = await reads();
+  await page.waitForTimeout(1200);
+  assert.equal(await reads(), exhaustedReads);
+  await page.evaluate(value => {
+    (window as Window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse = value;
+    const video = document.createElement('video'); video.id = 'readiness-fixture'; document.body.append(video);
+    video.dispatchEvent(new Event('loadedmetadata')); video.dispatchEvent(new Event('playing'));
+  }, { ...response, videoDetails: { ...response.videoDetails, videoId: 'fixture_007' }, streamingData: { adaptiveFormats: [...raw.formats, { ...raw.formats[0], itag: 313, height: 2160, fps: 60 }] } });
+  await inline.locator('.main:not([disabled])').filter({ hasText: '下载 2160p' }).waitFor();
+  assert.equal(await reads(), exhaustedReads + 1); // Both events share one read.
+  assert.equal(await inline.locator('.menu:popover-open').count(), 0);
+  await inline.getByRole('button', { name: '选择下载清晰度' }).click();
+  await inline.locator('.option').filter({ hasText: '90p' }).click();
+  await page.evaluate(() => document.querySelector('#readiness-fixture')!.dispatchEvent(new Event('playing')));
+  assert.match(await inline.locator('.main').textContent() || '', /下载 90p/);
+  assert.equal(await reads(), exhaustedReads + 1); // Preserve explicit selection.
+  // A discarded video's scheduled retry must not read or overwrite the new one.
+  await page.evaluate(() => { history.pushState({}, '', '/watch?v=fixture_008'); document.dispatchEvent(new Event('yt-navigate-finish')); });
+  await inline.locator('.main').filter({ hasText: '正在重试清晰度' }).waitFor();
+  await page.evaluate(value => {
+    history.pushState({}, '', '/watch?v=fixture_009');
+    (window as Window & { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse = value;
+    document.dispatchEvent(new Event('yt-navigate-finish'));
+  }, { ...response, videoDetails: { ...response.videoDetails, videoId: 'fixture_009' } });
+  await inline.locator('.main:not([disabled])').filter({ hasText: '下载 90p' }).waitFor();
+  const currentReads = await reads();
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => document.querySelector('#readiness-fixture')!.dispatchEvent(new Event('playing')));
+  assert.equal(await reads(), currentReads); // Old timer/listeners were removed.
   assert.equal(await inline.locator('.menu:popover-open').count(), 0);
   // No captured SABR session exists. Resolve actual direct source formats and
   // download from one click; info/start reuse the same short-lived resolution.
