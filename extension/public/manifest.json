@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "YouTube 本机下载",
-  "version": "0.1.7",
-  "description": "在 YouTube 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
+  "name": "YouTube / Bilibili 本机下载",
+  "version": "0.2.2",
+  "description": "在 YouTube 或 Bilibili 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
   "minimum_chrome_version": "120",
   "icons": {
     "16": "icons/icon16.png",
@@ -16,12 +16,20 @@
     "offscreen",
     "scripting",
     "activeTab",
-    "webRequest"
+    "webRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
-    "https://*.googlevideo.com/*"
+    "https://*.googlevideo.com/*",
+    "https://www.bilibili.com/*",
+    "https://m.bilibili.com/*",
+    "https://bilibili.com/*",
+    "https://api.bilibili.com/*",
+    "https://*.bilivideo.com/*",
+    "https://*.bilivideo.cn/*",
+    "https://upos-hz-mirrorakam.akamaized.net/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -34,13 +42,16 @@
       "32": "icons/icon32.png"
     },
     "default_popup": "popup.html",
-    "default_title": "YouTube 本机下载"
+    "default_title": "YouTube / Bilibili 本机下载"
   },
   "content_scripts": [
     {
       "matches": [
         "https://www.youtube.com/*",
-        "https://m.youtube.com/*"
+        "https://m.youtube.com/*",
+        "https://www.bilibili.com/*",
+        "https://m.bilibili.com/*",
+        "https://bilibili.com/*"
       ],
       "js": [
         "content.js"
@@ -49,6 +60,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://www.youtube.com https://m.youtube.com https://*.googlevideo.com; worker-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; connect-src 'self' https://www.youtube.com https://m.youtube.com https://*.googlevideo.com https://*.bilivideo.com https://*.bilivideo.cn https://upos-hz-mirrorakam.akamaized.net; worker-src 'self'"
   }
 }

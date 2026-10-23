@@ -83,7 +83,7 @@ async function run(snapshot: PageSnapshot, selected: Choice, session: PlaybackSe
     const af = snapshot.formats.find(format => format.itag === choice.audioItag);
     let video: File | undefined; let audio: File | undefined;
     // Reuse the browser's already transformed SABR URL and content-bound session.
-    if (snapshot.sabrUrl && playbackMatches(snapshot, session)) {
+    if (snapshot.site !== 'bilibili' && snapshot.sabrUrl && playbackMatches(snapshot, session)) {
       let activeSession: PlaybackSession = session;
       refreshSession = incoming => {
         if (!playbackMatches(snapshot, incoming)) return;
@@ -122,18 +122,18 @@ async function run(snapshot: PageSnapshot, selected: Choice, session: PlaybackSe
       if (!vf?.url && !vf?.signatureCipher && !af?.url && !af?.signatureCipher) {
         throw new Error('请先播放几秒视频后重试，以获取当前播放会话。切换视频后需重新播放。');
       }
-      const needsPlayer = [vf, af].some(format => format && (format.signatureCipher || format.cipher || (format.url && new URL(format.url).searchParams.has('n'))));
+      const needsPlayer = snapshot.site !== 'bilibili' && [vf, af].some(format => format && (format.signatureCipher || format.cipher || (format.url && new URL(format.url).searchParams.has('n'))));
       const player = needsPlayer ? await decipher(snapshot) : undefined;
       const tracks: { kind: string; handle: FileSystemFileHandle; writer: FileSystemWritableFileStream; url: string; length: number }[] = [];
       try {
         for (const [format, kind] of [[vf, 'video'], [af, 'audio']] as const) {
           if (!format) continue;
           const value = player ? await player.decipher(format.url, format.signatureCipher, format.cipher) : format.url!;
-          const url = mediaURL(value);
+          const url = mediaURL(value, snapshot.site);
           const handle = await directory.getFileHandle(kind, { create: true });
           tracks.push({ kind, handle, writer: await handle.createWritable(), url, length: Number(format.contentLength) });
         }
-        await downloadParts(tracks.map(track => ({ url: track.url, length: track.length,
+        await downloadParts(tracks.map(track => ({ url: track.url, length: track.length, site: snapshot.site,
           write: (data, position) => track.writer.write({ type: 'write', position, data }) })), signal, count => {
           received += count; update('downloading', choice.estimatedBytes);
         });

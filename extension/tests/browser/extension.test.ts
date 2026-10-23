@@ -120,7 +120,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   assert.equal(await popup.getByRole('button', { name: '下载 90p', exact: false }).isEnabled(), true);
   assert.equal(await popup.locator('[popover]').count(), 0);
   assert.equal(await popup.evaluate(() => document.documentElement.getBoundingClientRect().width), 400);
-  assert.match(await popup.locator('#version').textContent() || '', /^版本 0\.1\./);
+  assert.equal(await popup.locator('#version').textContent(), `版本 ${JSON.parse(await readFile('dist/manifest.json', 'utf8')).version}`);
   const send = async <T>(type: string, data: Record<string, unknown> = {}) => {
     const reply = await popup.evaluate(async message => chrome.runtime.sendMessage(message), { target: 'background', type, tabId, ...data }) as Reply<T>;
     assert.ok(reply.ok, !reply.ok ? reply.error : ''); return reply.value;
@@ -146,6 +146,17 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   await page.evaluate(() => document.querySelector('ytd-watch-metadata')!.remove());
   await page.locator('#yt-local-download-root[data-floating]').waitFor();
   assert.equal(await inline.getByRole('button', { name: '下载当前视频' }).isVisible(), true);
+  await page.bringToFront();
+  await page.evaluate(() => document.documentElement.requestFullscreen());
+  await page.locator('#yt-local-download-root[hidden]').waitFor({ state: 'attached' });
+  assert.equal(await inline.isVisible(), false);
+  await page.evaluate(() => document.exitFullscreen());
+  await page.locator('#yt-local-download-root[data-floating]:not([hidden])').waitFor();
+  await page.evaluate(() => document.querySelector('#movie_player')!.classList.add('ytp-fullscreen'));
+  await page.locator('#yt-local-download-root[hidden]').waitFor({ state: 'attached' });
+  assert.equal(await inline.isVisible(), false);
+  await page.evaluate(() => document.querySelector('#movie_player')!.classList.remove('ytp-fullscreen'));
+  await page.locator('#yt-local-download-root[data-floating]:not([hidden])').waitFor();
   await page.evaluate(() => { const metadata = document.createElement('ytd-watch-metadata'); metadata.innerHTML = '<div id="top-level-buttons-computed"></div>'; document.body.append(metadata); });
   await page.locator('ytd-watch-metadata #yt-local-download-root:not([data-floating])').waitFor();
   await inline.getByRole('button', { name: '选择下载清晰度' }).click();
@@ -239,7 +250,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   assert.equal(await inline.locator('.inline-progress').getAttribute('value'), String(percent));
   popup = await context.newPage(); await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await popup.bringToFront(); await popup.reload();
-  await popup.locator('#video-title').filter({ hasText: '先打开一个 YouTube 视频' }).waitFor();
+  await popup.locator('#video-title').filter({ hasText: '先打开一个 YouTube 或 Bilibili 视频' }).waitFor();
   await popup.locator('.record').first().locator('.record-progress[value]').waitFor({ state: 'visible' });
   assert.equal(await popup.locator('.record').first().locator('.record-progress').getAttribute('value'), String(percent));
   assert.match(await popup.locator('.record').first().locator('.record-status').textContent() || '', new RegExp(`${percent}%`));

@@ -18,15 +18,18 @@ BitTorrent (magnet / .torrent). Paste a URL, pick options, download.
 - **Theme & language**: dark/light/system theme toggle and 中文/English toggle (top-right);
   choices are remembered.
 
-## YouTube browser extension
+## YouTube / Bilibili browser extension
 
 An independent [Chrome / Edge extension](extension/README.md) adds a quality menu
-below YouTube videos and downloads/muxes media inside the browser. It needs no
+below YouTube and Bilibili videos and downloads/muxes media inside the browser. It needs no
 application backend or native helper. Install the built directory through
 “Load unpacked” in the browser's extension manager.
-Version 0.1.5 shows task progress and file sizes in the recent-download list, including when opened outside YouTube. It retains four concurrent range requests and verified media filenames.
+Version 0.2.0 adds ordinary Bilibili BV/AV videos and the current part, available quality selection, MP4 and original M4A audio export. Both sites share progress, cancellation, local history, up to four concurrent range requests and verified media filenames. YouTube playlists/channels and Bilibili multipart/collection batches are not supported by the extension.
+Version 0.2.1 moves the Bilibili download control to the right of the action row and fixes missing native sidebar images, avatars and header content after page reload.
+Version 0.2.2 hides the on-page control and closes its quality menu in video fullscreen or Bilibili web fullscreen, restoring it on exit.
 
-The extension reuses the YouTube page's login state; no cookie export is needed.
+The extension reuses the site's normal page login state; no cookie export is needed.
+A full public Bilibili 480P H.264/AAC MP4 (about 212 seconds) has been verified; real logged-in/premium-account quality remains unverified.
 Version 0.1.2 has completed a public 1080p test clip and a full 2160p MP4 with
 audio from a roughly 13-minute video. Availability still depends on YouTube's
 responses. See the extension README for setup and scope.

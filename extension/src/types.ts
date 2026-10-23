@@ -1,5 +1,7 @@
 import type { ClientInfo } from 'googlevideo/protos';
 
+export type Site = 'youtube' | 'bilibili';
+export interface VideoTarget { site: Site; videoId: string; url: string; identity: string; part: number }
 export interface RawFormat {
   itag: number; mimeType: string; bitrate: number;
   url?: string; signatureCipher?: string; cipher?: string;
@@ -9,6 +11,7 @@ export interface RawFormat {
   drmFamilies?: string[]; drmTrackType?: string; type?: string;
 }
 export interface PageSnapshot {
+  site?: Site;
   videoId: string; title: string; duration: number; playerUrl?: string;
   status: string; reason?: string; live: boolean;
   formats: RawFormat[]; sabrUrl?: string; ustreamerConfig?: string;
@@ -23,9 +26,10 @@ export interface Choice {
   id: string; videoItag?: number; audioItag?: number;
   label: string; fps?: number; container: 'mp4' | 'webm' | 'm4a'; estimatedBytes?: number;
 }
-export interface VideoInfo { videoId: string; title: string; duration: number; choices: Choice[] }
+export interface VideoInfo { site?: Site; videoId: string; title: string; duration: number; choices: Choice[] }
 export type TaskState = 'queued' | 'resolving' | 'downloading' | 'merging' | 'saving' | 'completed' | 'failed' | 'cancelled';
 export interface Task {
+  site?: Site;
   id: string; videoId: string; title: string; choice: Choice; state: TaskState;
   created: number; received: number; total?: number; error?: string; downloadId?: number; filename?: string; fileSize?: number;
 }
@@ -35,7 +39,7 @@ export const messageError = (error: unknown) => error instanceof Error ? error.m
 
 export async function call<T>(type: string, data: Record<string, unknown> = {}, target = 'background'): Promise<T> {
   const reply = await chrome.runtime.sendMessage({ target, type, ...data }) as Reply<T> | undefined;
-  if (!reply) throw new Error('扩展未响应，请在扩展管理页重新加载后刷新 YouTube。');
+  if (!reply) throw new Error('扩展未响应，请在扩展管理页重新加载后刷新视频页面。');
   if (!reply.ok) throw new Error(reply.error);
   return reply.value;
 }

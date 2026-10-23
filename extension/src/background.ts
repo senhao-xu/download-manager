@@ -1,6 +1,7 @@
 import { VideoPlaybackAbrRequest } from 'googlevideo/protos';
-import { videoId, choices, filename, mediaMime, matchesSavedName } from './core';
+import { videoId, videoTarget, choices, filename, mediaMime, matchesSavedName, BILIBILI_MEDIA_HOSTS } from './core';
 import { readPlayer } from './page';
+import { readBilibili } from './bilibili';
 import { call, messageError, terminal } from './types';
 import type { Task, PlaybackSession, PageSnapshot, Reply } from './types';
 
@@ -43,14 +44,22 @@ async function reconcile() {
   }));
   await persist(values);
 }
-const initialized = reconcile();
+const initialized = (async () => {
+  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [1], addRules: [{
+    id: 1, priority: 1,
+    action: { type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'Referer', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: 'https://www.bilibili.com/' }] },
+    condition: { initiatorDomains: [chrome.runtime.id], requestDomains: BILIBILI_MEDIA_HOSTS,
+      requestMethods: [chrome.declarativeNetRequest.RequestMethod.GET], resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST, chrome.declarativeNetRequest.ResourceType.MEDIA, chrome.declarativeNetRequest.ResourceType.OTHER] },
+  }] });
+  await reconcile();
+})();
 
 async function ensureControls(tabId: number) {
   try { await chrome.tabs.sendMessage(tabId, { target: 'content', type: 'mount' }); }
   catch { await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); }
 }
 chrome.runtime.onInstalled.addListener(() => {
-  void chrome.tabs.query({ url: ['https://www.youtube.com/*', 'https://m.youtube.com/*'] }).then(tabs =>
+  void chrome.tabs.query({ url: ['https://www.youtube.com/*', 'https://m.youtube.com/*', 'https://www.bilibili.com/*', 'https://m.bilibili.com/*', 'https://bilibili.com/*'] }).then(tabs =>
     Promise.allSettled(tabs.filter(tab => tab.id !== undefined && !tab.discarded).map(tab => ensureControls(tab.id!))));
 });
 
@@ -86,14 +95,18 @@ const directSources = new Map<number, { videoId: string; expires: number; source
 chrome.tabs.onRemoved.addListener(id => directSources.delete(id));
 async function snapshot(tabId: number, direct = false): Promise<PageSnapshot> {
   const tab = await chrome.tabs.get(tabId);
-  const id = videoId(tab.url || '');
-  const [result] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: readPlayer, args: [id, direct] });
-  if (!result?.result) throw new Error('无法读取视频，请刷新 YouTube 页面后重试。');
+  const target = videoTarget(tab.url || '');
+  const [result] = target.site === 'bilibili'
+    ? await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: readBilibili, args: [target.identity, target.part] })
+    : await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: readPlayer, args: [target.identity, direct] });
+  if (!result?.result) throw new Error('无法读取视频，请刷新视频页面后重试。');
+  if (videoTarget((await chrome.tabs.get(tabId)).url || '').videoId !== target.videoId) throw new Error('视频或分 P 已切换，请重新读取清晰度。');
   return result.result;
 }
 async function downloadSource(tabId: number): Promise<PageSnapshot> {
   const native = await snapshot(tabId);
   choices(native); // Preserve native login, live and unavailable-video checks.
+  if (native.site === 'bilibili') return native;
   const needsSource = !!native.sabrUrl || native.formats.some(format => !format.drmFamilies?.length && !format.drmTrackType && !format.url && !format.signatureCipher && !format.cipher);
   if (!needsSource) return native;
   const cached = directSources.get(tabId);
@@ -111,7 +124,7 @@ async function downloadSource(tabId: number): Promise<PageSnapshot> {
 async function tabFor(sender: chrome.runtime.MessageSender, requested?: unknown) {
   const pageTab = sender.url?.startsWith(extensionOrigin) ? undefined : sender.tab?.id;
   const id = pageTab ?? (typeof requested === 'number' ? requested : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id);
-  if (id === undefined) throw new Error('请先打开一个 YouTube 视频。');
+  if (id === undefined) throw new Error('请先打开一个 YouTube 或 Bilibili 视频。');
   return id;
 }
 const progressRank = { queued: 0, resolving: 1, downloading: 2, merging: 3, saving: 4 };
@@ -150,20 +163,20 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (data.target !== 'background' || typeof data.type !== 'string') return;
   const internal = sender.url?.startsWith(extensionOrigin) === true;
   const executor = sender.url === chrome.runtime.getURL('offscreen.html');
-  const allowed = internal || (sender.url && /^https:\/\/(www|m)\.youtube\.com\//.test(sender.url));
+  const allowed = internal || (sender.url && /^https:\/\/(?:(?:www|m)\.youtube\.com|(?:(?:www|m)\.)?bilibili\.com)\//.test(sender.url));
   if (!allowed) return;
   const execute = async () => {
     await initialized;
     if (data.type === 'info') {
       const tabId = await tabFor(sender, data.tabId);
       // Also repair tabs opened before installation or extension reload.
-      videoId((await chrome.tabs.get(tabId)).url || '');
+      videoTarget((await chrome.tabs.get(tabId)).url || '');
       await ensureControls(tabId);
       return choices(await downloadSource(tabId));
     }
     if (data.type === 'list') return tasks();
     if (data.type === 'open' && internal) {
-      const id = videoId(String(data.url)); await chrome.tabs.create({ url: `https://www.youtube.com/watch?v=${id}` }); return null;
+      const target = videoTarget(String(data.url)); await chrome.tabs.create({ url: target.url }); return null;
     }
     if (data.type === 'show' && internal) { if (typeof data.downloadId !== 'number') throw new Error('无效文件。'); await chrome.downloads.show(data.downloadId); return null; }
     return serial(async () => {
@@ -174,7 +187,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         if (source.videoId !== data.videoId) throw new Error('视频已经切换，请重新选择清晰度。');
         const choice = choices(source).choices.find(item => item.id === data.choiceId);
         if (!choice) throw new Error('该清晰度不可用，请刷新列表。');
-        const task: Task = { id: crypto.randomUUID(), videoId: source.videoId, title: source.title, choice, state: 'queued', created: Date.now(), received: 0 };
+        const task: Task = { id: crypto.randomUUID(), site: source.site || 'youtube', videoId: source.videoId, title: source.title, choice, state: 'queued', created: Date.now(), received: 0 };
         values.unshift(task); await persist(values);
         try {
           await ensureOffscreen();

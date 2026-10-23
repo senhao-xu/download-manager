@@ -1,6 +1,6 @@
 {
   "name": "youtube-local-downloader",
-  "version": "0.1.7",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {

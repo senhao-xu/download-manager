@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>YouTube 本机下载</title>
+  <title>YouTube / Bilibili 本机下载</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header><img class="mark" src="icons/icon128.png" width="38" height="38" alt=""><div><h1>YouTube 本机下载</h1><p>选好清晰度，直接保存到电脑</p></div></header>
+  <header><img class="mark" src="icons/icon128.png" width="38" height="38" alt=""><div><h1>YouTube / Bilibili 本机下载</h1><p>选好清晰度，直接保存到电脑</p></div></header>
   <main>
     <section id="current" class="card" aria-label="当前视频" aria-busy="true">
       <div class="section-head"><span class="eyebrow">当前视频</span><button id="refresh" class="text-button" type="button">重新读取</button></div>
@@ -27,7 +27,7 @@
         <p id="task-error" class="muted"></p>
       </div>
     </section>
-    <details id="link-entry"><summary>通过链接打开其他视频</summary><form><label for="url">YouTube 视频链接</label><div class="input-row"><input id="url" type="url" placeholder="粘贴 youtube.com 或 youtu.be 链接" required><button class="secondary" type="submit">打开</button></div></form></details>
+    <details id="link-entry"><summary>通过链接打开其他视频</summary><form><label for="url">YouTube / Bilibili 视频链接</label><div class="input-row"><input id="url" type="url" placeholder="粘贴 YouTube 或 Bilibili 完整视频链接" required><button class="secondary" type="submit">打开</button></div></form></details>
     <p id="error" role="alert"></p>
     <section aria-label="最近下载"><div class="section-head history-head"><h2>最近下载</h2><span id="history-count" class="muted"></span></div><div id="history"><p class="empty">还没有下载记录</p></div></section>
   </main>

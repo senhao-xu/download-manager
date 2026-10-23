@@ -1,7 +1,7 @@
 import { call, messageError, terminal } from './types';
 import type { Choice, Task, VideoInfo } from './types';
 import { labels } from './widget';
-import { bytes, videoId, defaultChoice, progressPercent, taskSize } from './core';
+import { bytes, videoTarget, defaultChoice, progressPercent, taskSize } from './core';
 
 const get = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const error = get<HTMLParagraphElement>('#error');
@@ -43,7 +43,7 @@ async function load() {
     info = await call<VideoInfo>('info', { tabId }); selected = defaultChoice(info);
     title.textContent = info.title; title.title = info.title;
     const seconds = Math.floor(info.duration); const minutes = Math.floor(seconds / 60);
-    get('#video-meta').textContent = `YouTube · ${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+    get('#video-meta').textContent = `${info.site === 'bilibili' ? 'Bilibili' : 'YouTube'} · ${minutes}:${String(seconds % 60).padStart(2, '0')}`;
     quality.replaceChildren();
     for (const [name, video] of [['视频（含声音）', true], ['仅音频', false]] as const) {
       const group = document.createElement('optgroup'); group.label = name;
@@ -63,9 +63,9 @@ async function load() {
 }
 void (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  try { videoId(tab?.url || ''); tabId = tab.id; await load(); }
+  try { videoTarget(tab?.url || ''); tabId = tab.id; await load(); }
   catch {
-    title.textContent = '先打开一个 YouTube 视频';
+    title.textContent = '先打开一个 YouTube 或 Bilibili 视频';
     notice.textContent = '在视频页面打开此扩展，或在下方粘贴视频链接。';
     refresh.hidden = true; get('#current').setAttribute('aria-busy', 'false'); get<HTMLDetailsElement>('#link-entry').open = true;
   }

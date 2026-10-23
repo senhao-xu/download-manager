@@ -5,6 +5,8 @@ import { Input, BufferSource, ALL_FORMATS } from 'mediabunny';
 import { tmpdir } from 'node:os';
 import { resolve, join, extname, basename } from 'node:path';
 const profile = await mkdtemp(join(tmpdir(), 'youtube-live-'));
+const site = process.env.BILIBILI_TEST_URL ? 'bilibili' : 'youtube';
+const videoURL = process.env.BILIBILI_TEST_URL || `https://www.youtube.com/watch?v=${process.env.YOUTUBE_TEST_VIDEO || 'DTi8wZ1a1TA'}`;
 await mkdir('test-results', { recursive: true });
 const downloadPath = join(profile, 'downloads'); await mkdir(downloadPath);
 await mkdir(join(profile, 'Default'));
@@ -28,33 +30,33 @@ try {
   await downloadSession.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath });
   await downloadSession.detach();
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  await worker.evaluate(() => {
+  await worker.evaluate(site => {
     const origin = chrome.runtime.getURL('').replace(/\/$/, '');
     const active = new Map(); const byTrack = new Map();
     globalThis.rangeStats = { peak: 0, peakPerTrack: 0, requests: 0 };
     chrome.webRequest.onBeforeRequest.addListener(details => {
       const url = new URL(details.url);
-      if (details.method !== 'GET' || details.initiator !== origin || !url.searchParams.has('range')) return;
-      const track = url.searchParams.get('itag') || 'unknown';
+      if (details.method !== 'GET' || details.initiator !== origin || site === 'youtube' && !url.searchParams.has('range')) return;
+      const track = url.searchParams.get('itag') || url.pathname;
       active.set(details.requestId, track); byTrack.set(track, (byTrack.get(track) || 0) + 1);
       globalThis.rangeStats.requests++;
       globalThis.rangeStats.peak = Math.max(globalThis.rangeStats.peak, active.size);
       globalThis.rangeStats.peakPerTrack = Math.max(globalThis.rangeStats.peakPerTrack, byTrack.get(track));
-    }, { urls: ['https://*.googlevideo.com/videoplayback*'] });
+    }, { urls: ['https://*.googlevideo.com/videoplayback*', 'https://*.bilivideo.com/*', 'https://*.bilivideo.cn/*', 'https://upos-hz-mirrorakam.akamaized.net/*'] });
     const finish = details => {
       const track = active.get(details.requestId);
       if (!track) return;
       active.delete(details.requestId); byTrack.set(track, byTrack.get(track) - 1);
     };
-    chrome.webRequest.onCompleted.addListener(finish, { urls: ['https://*.googlevideo.com/videoplayback*'] });
-    chrome.webRequest.onErrorOccurred.addListener(finish, { urls: ['https://*.googlevideo.com/videoplayback*'] });
-  });
+    chrome.webRequest.onCompleted.addListener(finish, { urls: ['https://*.googlevideo.com/videoplayback*', 'https://*.bilivideo.com/*', 'https://*.bilivideo.cn/*', 'https://upos-hz-mirrorakam.akamaized.net/*'] });
+    chrome.webRequest.onErrorOccurred.addListener(finish, { urls: ['https://*.googlevideo.com/videoplayback*', 'https://*.bilivideo.com/*', 'https://*.bilivideo.cn/*', 'https://upos-hz-mirrorakam.akamaized.net/*'] });
+  }, site);
   const id = new URL(worker.url()).hostname;
   const player = await context.newPage();
-  await player.goto(`https://www.youtube.com/watch?v=${process.env.YOUTUBE_TEST_VIDEO || 'DTi8wZ1a1TA'}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await player.goto(videoURL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await player.waitForTimeout(process.env.HEADED === '1' ? 15000 : 8000);
   console.log(JSON.stringify(await player.evaluate(() => { const response = document.querySelector('#movie_player')?.getPlayerResponse?.() || window.ytInitialPlayerResponse; return { title: document.title, videoId: response?.videoDetails?.videoId, status: response?.playabilityStatus?.status, reason: response?.playabilityStatus?.reason }; })));
-  const tabId = await worker.evaluate(async () => (await chrome.tabs.query({ url: 'https://www.youtube.com/watch*' }))[0].id);
+  const tabId = await worker.evaluate(async url => (await chrome.tabs.query({ url }))[0].id, site === 'bilibili' ? 'https://www.bilibili.com/video/*' : 'https://www.youtube.com/watch*');
   console.log(JSON.stringify(await worker.evaluate(async tabId => { const session = (await chrome.storage.session.get(`playback-${tabId}`))[`playback-${tabId}`]; return { capturedSession: !!session, videoId: session?.videoId, age: session && Date.now() - session.capturedAt, configLength: session?.ustreamerConfig?.length, poLength: session?.poToken?.length, contexts: session?.contexts?.map(item=>item.type) }; }, tabId)));
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${id}/popup.html`);
@@ -67,9 +69,10 @@ try {
   await player.locator('#yt-local-download-root').getByRole('button', { name: '选择下载清晰度' }).click();
   await player.locator('#yt-local-download-root .option').first().waitFor();
   await mkdir('artifacts', { recursive: true });
-  await player.screenshot({ path: resolve('artifacts/youtube-extension-preview.png') });
+  await player.screenshot({ path: resolve(`artifacts/${site}-extension-preview.png`) });
   log.push({ title: info.value.title, choices: info.value.choices.map(item => ({ id: item.id, label: item.label, container: item.container })) });
-  const choice = (process.env.YOUTUBE_TEST_QUALITY && info.value.choices.find(item => item.label === process.env.YOUTUBE_TEST_QUALITY)) || info.value.choices.find(item => item.videoItag) || info.value.choices[0];
+  const quality = process.env.BILIBILI_TEST_QUALITY || process.env.YOUTUBE_TEST_QUALITY;
+  const choice = (quality && info.value.choices.find(item => item.label === quality)) || info.value.choices.find(item => item.videoItag) || info.value.choices[0];
   console.log(JSON.stringify({ selected: choice.label, container: choice.container, estimatedBytes: choice.estimatedBytes }));
   if (process.env.YOUTUBE_TEST_ENTRY === 'popup') {
     await popup.locator('#quality').selectOption(choice.id); await popup.locator('#download').click();
@@ -104,12 +107,12 @@ try {
       assert.equal(task.fileSize, files[0].fileSize);
       await popup.locator('.record-title').filter({ hasText: task.filename }).first().waitFor();
       await popup.locator('.record').filter({ hasText: task.filename }).first().locator('.record-size').filter({ hasText: '文件大小' }).waitFor();
-      await popup.locator('body').screenshot({ path: resolve('artifacts/youtube-saved-file-preview.png') });
+      await popup.locator('body').screenshot({ path: resolve(`artifacts/${site}-saved-file-preview.png`) });
       const expectedMime = task.choice.container === 'm4a' ? 'audio/mp4' : `${task.choice.videoItag ? 'video' : 'audio'}/${task.choice.container}`;
       // Chrome's download database also uses extension-based MIME aliases.
       const mimeAliases = task.choice.container === 'm4a' ? ['audio/x-m4a'] : task.choice.container === 'webm' && !task.choice.videoItag ? ['video/webm'] : [];
       assert.ok([expectedMime, ...mimeAliases].includes(files[0].mime), files[0].mime);
-      const destination = resolve(`test-results/live-${task.choice.label}.${task.choice.container}`);
+      const destination = resolve(`test-results/live-${site === 'bilibili' ? 'bilibili-' : ''}${task.choice.label.replace(/[<>:"/\\|?*]/g, '_')}.${task.choice.container}`);
       await copyFile(files[0].filename, destination);
       const input = new Input({ source: new BufferSource(await readFile(destination)), formats: ALL_FORMATS });
       const video = await input.getPrimaryVideoTrack(); const audio = await input.getPrimaryAudioTrack();

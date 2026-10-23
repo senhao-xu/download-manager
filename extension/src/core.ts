@@ -1,4 +1,20 @@
-import type { Choice, PageSnapshot, RawFormat, VideoInfo, PlaybackSession, Task } from './types';
+import type { Choice, PageSnapshot, RawFormat, VideoInfo, PlaybackSession, Task, Site, VideoTarget } from './types';
+
+export const BILIBILI_MEDIA_HOSTS = ['bilivideo.com', 'bilivideo.cn', 'upos-hz-mirrorakam.akamaized.net'];
+
+export function videoTarget(input: string): VideoTarget {
+  const url = new URL(input);
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) throw new Error('请输入有效的 YouTube 或 Bilibili HTTPS 视频链接。');
+  if (['www.bilibili.com', 'bilibili.com', 'm.bilibili.com'].includes(url.hostname)) {
+    const identity = url.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10}|av[1-9]\d*)\/?$/)?.[1];
+    const partValue = url.searchParams.get('p') || '1';
+    const part = Number(partValue);
+    if (!identity || !/^[1-9]\d*$/.test(partValue) || !Number.isSafeInteger(part)) throw new Error('只支持 Bilibili 普通 BV/AV 视频和当前分 P，请使用视频页面的完整链接。');
+    return { site: 'bilibili', identity, part, videoId: `bilibili:${identity}:p${part}`, url: `https://www.bilibili.com/video/${identity}/${part === 1 ? '' : `?p=${part}`}` };
+  }
+  const identity = videoId(input);
+  return { site: 'youtube', identity, part: 1, videoId: identity, url: `https://www.youtube.com/watch?v=${identity}` };
+}
 
 export function playbackMatches(snapshot: PageSnapshot, session?: PlaybackSession): session is PlaybackSession {
   if (!session || session.videoId !== snapshot.videoId || Date.now() - session.capturedAt > 15 * 60_000 || Date.now() < session.capturedAt) return false;
@@ -23,9 +39,12 @@ export function videoId(input: string): string {
   return id;
 }
 
-export function mediaURL(value: string): string {
+export function mediaURL(value: string, site: Site = 'youtube'): string {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || !url.hostname.endsWith('.googlevideo.com') || url.username || url.password || url.port || url.pathname !== '/videoplayback') {
+  const valid = site === 'bilibili'
+    ? BILIBILI_MEDIA_HOSTS.some(host => url.hostname === host || host !== 'upos-hz-mirrorakam.akamaized.net' && url.hostname.endsWith(`.${host}`)) && url.pathname.startsWith('/upgcxcode/')
+    : url.hostname.endsWith('.googlevideo.com') && url.pathname === '/videoplayback';
+  if (url.protocol !== 'https:' || !valid || url.username || url.password || url.port) {
     throw new Error('视频服务器地址无效。请刷新视频页面后重试。');
   }
   return url.href;
@@ -58,7 +77,8 @@ export function progressPercent(task: Pick<Task, 'state' | 'received' | 'total'>
 }
 
 export function choices(snapshot: PageSnapshot): VideoInfo {
-  if (snapshot.status !== 'OK') throw new Error(snapshot.reason || 'YouTube 暂时无法播放此视频，请在页面登录或完成验证后重试。');
+  const siteName = snapshot.site === 'bilibili' ? 'Bilibili' : 'YouTube';
+  if (snapshot.status !== 'OK') throw new Error(snapshot.reason || `${siteName} 暂时无法播放此视频，请在页面登录或完成验证后重试。`);
   if (snapshot.live) throw new Error('暂不支持正在进行的直播。');
   const available = snapshot.formats.filter(format => !format.drmFamilies?.length && !format.drmTrackType && format.type !== 'FORMAT_STREAM_TYPE_OTF' && (format.url || format.signatureCipher || format.cipher || snapshot.sabrUrl));
   const audio = available.filter(format => format.mimeType.startsWith('audio/'));
@@ -77,15 +97,16 @@ export function choices(snapshot: PageSnapshot): VideoInfo {
     const id = `${format.itag}:${paired?.itag || 0}`;
     const bytes = size(format); const audioBytes = paired && size(paired);
     // Keep one compatible codec pair per resolution, frame rate and container.
-    if (list.some(choice => choice.label === `${format.height}p` && choice.fps === format.fps && choice.container === container)) continue;
-    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label: `${format.height}p`, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
+    const label = snapshot.site === 'bilibili' && format.qualityLabel || `${format.height}p`;
+    if (list.some(choice => choice.label === label && choice.fps === format.fps && choice.container === container)) continue;
+    list.push({ id, videoItag: format.itag, audioItag: paired?.itag, label, fps: format.fps, container, estimatedBytes: bytes && (!paired || audioBytes) ? bytes + (audioBytes || 0) : undefined });
   }
   for (const webm of [false, true]) {
     const format = bestAudio(webm);
     if (format) list.push({ id: `audio:${format.itag}`, audioItag: format.itag, label: '仅音频', container: webm ? 'webm' : 'm4a', estimatedBytes: size(format) });
   }
-  if (!list.length) throw new Error('未获得可下载格式。请先播放几秒视频，再刷新列表；登录或验证提示需在 YouTube 页面完成。');
-  return { videoId: snapshot.videoId, title: snapshot.title, duration: snapshot.duration, choices: list };
+  if (!list.length) throw new Error(`未获得可下载格式。请先播放几秒视频，再刷新列表；登录或验证提示需在 ${siteName} 页面完成。`);
+  return { site: snapshot.site, videoId: snapshot.videoId, title: snapshot.title, duration: snapshot.duration, choices: list };
 }
 
 export function bytes(value?: number): string {

@@ -5,7 +5,9 @@ import type { Choice, VideoInfo, Task } from './types';
 export const labels: Record<Task['state'], string> = { queued: '等待下载', resolving: '准备下载', downloading: '正在下载', merging: '正在合并音画', saving: '正在保存文件', completed: '已完成', failed: '下载失败', cancelled: '已取消' };
 const styles = `
 :host{display:inline-flex!important;flex:0 0 auto!important;min-width:max-content;font:500 14px/1.5 Roboto,Arial,"Microsoft YaHei",sans-serif;--bg:#fff;--fg:#0f0f0f;--sub:#606060;--soft:#f2f2f2;--line:#ddd;color:var(--fg);vertical-align:middle}
+:host([hidden]){display:none!important}
 :host([data-floating]){position:fixed;right:24px;bottom:24px;z-index:2147483646;filter:drop-shadow(0 2px 8px #0004)}
+:host([data-anchored]){position:absolute!important;left:var(--yt-anchor-left)!important;top:var(--yt-anchor-top)!important;z-index:10}
 :host([data-dark]){--bg:#202020;--fg:#f1f1f1;--sub:#aaa;--soft:#333;--line:#454545}
 *{box-sizing:border-box}[hidden]{display:none!important}button{font:inherit;cursor:pointer;color:inherit}button:disabled{cursor:default;opacity:.6}button:focus-visible{outline:2px solid #3ea6ff;outline-offset:2px}
 .split{position:relative;display:inline-flex;overflow:hidden;white-space:nowrap;border-radius:24px;background:var(--fg);color:var(--bg);margin:0 6px}.main,.toggle{border:0;background:transparent;color:inherit;padding:9px 14px;min-height:38px}.main{border-radius:24px 0 0 24px}.toggle{border-radius:0 24px 24px 0;border-left:1px solid var(--sub);padding:9px 11px}.main:hover,.toggle:hover{opacity:.8}.split .inline-progress{position:absolute;left:0;bottom:0;width:100%;height:4px;margin:0;accent-color:#f03;background:#8885}.inline-progress::-webkit-progress-bar{background:#8885}.inline-progress::-webkit-progress-value{background:#f03}
@@ -33,7 +35,7 @@ export function createWidget(host: HTMLElement, tabId?: number) {
     const top = rect.bottom + 8 + height <= window.innerHeight - 12 ? rect.bottom + 8 : rect.top - height - 8;
     menu.style.top = `${Math.max(12, Math.min(top, window.innerHeight - height - 12))}px`;
   }
-  function open() { menu.showPopover(); toggle.setAttribute('aria-expanded', 'true'); position(); }
+  function open() { if (disposed || host.hidden) return; menu.showPopover(); toggle.setAttribute('aria-expanded', 'true'); position(); }
   menu.addEventListener('toggle', () => {
     const visible = menu.matches(':popover-open');
     toggle.setAttribute('aria-expanded', String(visible));
@@ -142,7 +144,10 @@ export function createWidget(host: HTMLElement, tabId?: number) {
   const reposition = () => { if (menu.matches(':popover-open')) position(); };
   window.addEventListener('resize', reposition); window.addEventListener('scroll', reposition, true);
   void load();
-  return { load, open, destroy() {
+  return { load, open, setHidden(hidden: boolean) {
+    if (host.hidden !== hidden) host.hidden = hidden;
+    if (hidden && menu.matches(':popover-open')) menu.hidePopover();
+  }, destroy() {
     disposed = true; clearTimeout(retryTimer);
     document.removeEventListener('loadedmetadata', playerReady, true); document.removeEventListener('playing', playerReady, true);
     window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); host.remove();
