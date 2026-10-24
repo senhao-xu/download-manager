@@ -51,7 +51,7 @@ function renderEntries() {
     const metadata = document.createElement('span'); metadata.className = 'entry-meta'; entryMetadata.set(entry.videoId, metadata);
     text.append(name, metadata); row.append(check, cover(entry.videoId, entry.thumbnail), text); list.append(row);
   }
-  get('#selection').hidden = !entries.size;
+  get('#selection').hidden = !entries.size && !continuation;
   get('#more').hidden = !continuation || entries.size >= QUEUE_LIMIT;
   selectionCount();
   updateEntryMetadata();

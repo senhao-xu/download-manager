@@ -29,7 +29,8 @@ export function collectionSource(input: string): CollectionSource {
 }
 
 export function batchEntries(value: unknown): BatchEntry[] {
-  if (!Array.isArray(value) || !value.length || value.length > QUEUE_LIMIT) throw new Error(`请选择 1–${QUEUE_LIMIT} 个视频。`);
+  // Collection pages may contain no playable entries and still have a next page.
+  if (!Array.isArray(value) || value.length > QUEUE_LIMIT) throw new Error(`视频列表无效，最多支持 ${QUEUE_LIMIT} 个视频。`);
   const unique = new Map<string, BatchEntry>();
   for (const item of value) {
     if (!item || typeof item !== 'object' || typeof item.url !== 'string' || typeof item.title !== 'string') throw new Error('视频列表无效。');
