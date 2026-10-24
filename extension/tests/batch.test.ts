@@ -14,11 +14,12 @@ test('collection URLs canonicalize only supported first-party lists and channel 
   assert.equal(collectionSource('https://www.bilibili.com/video/BV1GJ411x7h7/?p=2').kind, 'video');
   for (const url of ['https://youtube.com.evil.test/playlist?list=PLabc', 'http://youtube.com/@YouTube', 'https://user@youtube.com/@YouTube', 'https://youtube.com:8080/@YouTube', 'https://youtube.com/results?search_query=test', 'https://space.bilibili.com/123/lists/0', 'https://space.bilibili.com.evil.test/123/lists/45', 'https://youtu.be/aqz-KE-bpKQ']) assert.throws(() => collectionSource(url), url);
 });
-test('submitted entries reject mismatched IDs, unsafe URLs, invalid quality and oversized batches', () => {
+test('collection entries allow empty pages and reject mismatched IDs, unsafe URLs and oversized batches', () => {
   const entry = { videoId: 'aqz-KE-bpKQ', title: 'Video', url: 'https://youtu.be/aqz-KE-bpKQ' };
+  assert.deepEqual(batchEntries([]), []);
   assert.equal(batchEntries([entry, entry]).length, 1);
   assert.equal(batchEntries([entry])[0].url, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
-  for (const value of [[], [null], [{ ...entry, videoId: 'other_id001' }], [{ ...entry, url: 'https://evil.test/' }], Array(1001).fill(entry)]) assert.throws(() => batchEntries(value));
+  for (const value of [null, {}, [null], [{ ...entry, videoId: 'other_id001' }], [{ ...entry, url: 'https://evil.test/' }], Array(1001).fill(entry)]) assert.throws(() => batchEntries(value));
   assert.throws(() => batchQuality('2160')); assert.equal(batchQuality('audio'), 'audio');
 });
 test('quality cap selects actual compatible formats and never silently exports audio for a video request', () => {
@@ -54,6 +55,19 @@ test('YouTube list parsing confines results to selected content, deduplicates an
   assert.deepEqual(page.entries.map(item => item.title), ['First', 'Short']); assert.equal(page.continuation, 'next-page');
   const next = parseYouTubeCollection({ onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [entry('fixture_002', 'Next')] } }] }, 'List', true);
   assert.equal(next.entries[0].videoId, 'fixture_002'); assert.equal(next.continuation, undefined);
+});
+test('YouTube pages containing only unplayable entries preserve their next-page token', () => {
+  const contents = [
+    { playlistVideoRenderer: { videoId: 'private_001', isPlayable: false } },
+    { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'next-playable-page' } } } },
+  ];
+  const initial = { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content: { playlistVideoListRenderer: { contents } } } }] } } };
+  const next = { onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: contents } }] };
+  for (const [data, continuation] of [[initial, false], [next, true]] as const) {
+    const page = parseYouTubeCollection(data, 'List', continuation);
+    assert.deepEqual(batchEntries(page.entries), []);
+    assert.equal(page.continuation, 'next-playable-page');
+  }
 });
 test('embedded page data parses nested JSON and escaped strings without executing page JavaScript', () => {
   const data = { title: 'brace } [ and "quotes" \\ path', nested: [{ value: 1 }] };

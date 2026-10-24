@@ -89,7 +89,9 @@ export function createQueue(deps: Dependencies) {
     pump,
     async settled(id: string) { await release(id); void pump(); },
     async enqueue(input: unknown, preference: unknown) {
-      const entries = batchEntries(input); const quality = batchQuality(preference);
+      const entries = batchEntries(input);
+      if (!entries.length) throw new Error(`请选择 1–${QUEUE_LIMIT} 个视频。`);
+      const quality = batchQuality(preference);
       const added = await deps.serial(async () => {
         const values = await deps.tasks();
         const pending = values.filter(task => !terminal(task.state));
@@ -101,7 +103,6 @@ export function createQueue(deps: Dependencies) {
           state: 'queued', created: Date.now() + index / 1000, received: 0, batch: { url: entry.url, quality },
         }));
         await deps.persist([...created.reverse(), ...values]);
-        await chrome.storage.local.set({ queuePaused: false });
         return fresh.length;
       });
       void pump(); return added;
@@ -126,7 +127,7 @@ export function createQueue(deps: Dependencies) {
         // A new execution identity makes late messages from the old worker inert.
         task.id = crypto.randomUUID(); task.created = Date.now(); task.state = 'queued'; task.received = 0;
         delete task.error; delete task.total; delete task.downloadId; delete task.filename; delete task.fileSize;
-        await deps.persist(values); await chrome.storage.local.set({ queuePaused: false });
+        await deps.persist(values);
       });
       void pump();
     },

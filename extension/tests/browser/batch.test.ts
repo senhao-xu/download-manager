@@ -61,6 +61,10 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
     { itag: 18, mimeType: 'video/webm; codecs="vp8, opus"', bitrate: 10000, width: 160, height: 90, fps: 10, audioChannels: 2, url: `https://fixture.googlevideo.com/videoplayback?id=${id}`, contentLength: String(media.length) },
   ] } });
   const item = (id: string) => ({ playlistVideoRenderer: { videoId: id, title: { simpleText: `测试 ${id}` } } });
+  const emptyPage = (token: string) => [
+    { playlistVideoRenderer: { videoId: 'private_001', isPlayable: false } },
+    { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token } } } },
+  ];
   const listData = (next: boolean) => ({ contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content: { playlistVideoListRenderer: { contents: [
     item(next ? 'batch_good2' : 'batch_bad01'), ...(!next ? [item('batch_good1'), { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'next-token' } } } }] : []),
   ] } } } }] } } });
@@ -69,11 +73,18 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
     const html = (body: string) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(body); };
     if (url.pathname === '/youtubei/v1/browse') {
       let body = ''; request.on('data', chunk => { body += chunk; }); request.on('end', () => {
-        assert.equal(JSON.parse(body).continuation, 'next-token');
-        response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [item('batch_good2')] } }] }));
+        const token = JSON.parse(body).continuation;
+        assert.ok(['next-token', 'empty-first', 'empty-middle'].includes(token));
+        const contents = token === 'empty-first' ? emptyPage('empty-middle') : [item(token === 'empty-middle' ? 'after_empty' : 'batch_good2')];
+        response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: contents } }] }));
       }); return;
     }
-    if (url.pathname === '/playlist' || url.pathname.startsWith('/@fixture/')) return html(`<title>测试列表 - YouTube</title><script>window.ytInitialData=${JSON.stringify({ ...listData(false), metadata: { playlistMetadataRenderer: { title: '测试列表' } } })};window.ytcfg={set(){}};ytcfg.set({"INNERTUBE_CONTEXT":{"client":{"clientName":"WEB","clientVersion":"fixture"}}});</script>`);
+    if (url.pathname === '/playlist' || url.pathname.startsWith('/@fixture/')) {
+      const data = url.searchParams.get('list') === 'PL_empty'
+        ? { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content: { playlistVideoListRenderer: { contents: emptyPage('empty-first') } } } }] } } }
+        : listData(false);
+      return html(`<title>测试列表 - YouTube</title><script>window.ytInitialData=${JSON.stringify({ ...data, metadata: { playlistMetadataRenderer: { title: '测试列表' } } })};window.ytcfg={set(){}};ytcfg.set({"INNERTUBE_CONTEXT":{"client":{"clientName":"WEB","clientVersion":"fixture"}}});</script>`);
+    }
     const requested = url.searchParams.get('v') || url.pathname.split('/').pop()!;
     const id = requested === 'batch_move1' ? 'batch_real1' : requested;
     const shorts = url.pathname.startsWith('/shorts/');
@@ -113,6 +124,22 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
     chrome.tabs.onCreated.addListener(() => state.collectionTabs!.created++);
     chrome.tabs.onRemoved.addListener(() => state.collectionTabs!.removed++);
   });
+  // Empty first and middle pages remain navigable until a playable entry appears.
+  await manager.getByLabel('播放列表、频道或合集链接').fill('https://www.youtube.com/playlist?list=PL_empty');
+  await manager.getByRole('button', { name: '读取列表', exact: true }).click();
+  const more = manager.getByRole('button', { name: '加载更多', exact: true });
+  await more.waitFor();
+  assert.equal(await manager.locator('.entry').count(), 0);
+  assert.equal(await manager.locator('#error').textContent(), '');
+  assert.equal(await manager.getByRole('button', { name: '加入下载队列', exact: true }).isDisabled(), true);
+  await more.click();
+  await manager.waitForFunction(() => !document.querySelector<HTMLButtonElement>('#read')!.disabled);
+  assert.equal(await manager.locator('.entry').count(), 0);
+  assert.equal(await manager.locator('#error').textContent(), '');
+  assert.equal(await more.isVisible(), true);
+  await more.click(); await manager.locator('.entry').first().waitFor();
+  assert.match(await manager.locator('.entry').textContent() || '', /after_empty/);
+  assert.equal(await more.isVisible(), false);
   assert.equal((await send<CollectionPage>('collection', { url: 'https://www.youtube.com/playlist?list=PL_fixture' })).entries.length, 2);
   await manager.getByLabel('播放列表、频道或合集链接').fill('https://www.youtube.com/playlist?list=PL_fixture');
   await manager.getByRole('button', { name: '读取列表', exact: true }).click();
@@ -188,6 +215,13 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   const current = await waitTask('batch_can01', 'resolving');
   await send('queue-control', { action: 'pause' }); await send('cancel', { id: current.id });
   assert.equal((await send<Task[]>('list')).find(task => task.videoId === 'batch_next1')?.state, 'queued');
+  const pausedTabs = await worker.evaluate(() => (globalThis as typeof globalThis & { collectionTabs?: { created: number; removed: number } }).collectionTabs);
+  assert.equal(await send<number>('enqueue', { entries: [entry('batch_next1')], quality: 'best' }), 0);
+  assert.equal(await send<number>('enqueue', { entries: [entry('batch_new01')], quality: 'best' }), 1);
+  await send('retry', { id: current.id });
+  assert.equal(await manager.evaluate(async () => (await chrome.storage.local.get('queuePaused')).queuePaused), true);
+  assert.ok((await send<Task[]>('list')).filter(task => ['batch_next1', 'batch_new01', 'batch_can01'].includes(task.videoId)).every(task => task.state === 'queued'));
+  assert.deepEqual(await worker.evaluate(() => (globalThis as typeof globalThis & { collectionTabs?: { created: number; removed: number } }).collectionTabs), pausedTabs);
   // Stop/restart the actual service worker. A waiting task stays waiting and
   // can be explicitly resumed; it must not become a fictitious failed download.
   const recovery = await context.newCDPSession(manager);
@@ -198,7 +232,9 @@ test('Shorts, paginated collections and persistent sequential batch queue in the
   assert.equal((await send<Task[]>('list')).find(task => task.videoId === 'batch_next1')?.state, 'queued');
   assert.equal(await manager.evaluate(async () => (await chrome.storage.local.get('queuePaused')).queuePaused), true);
   await recovery.detach(); worker = context.serviceWorkers()[0] || worker;
-  await send('queue-control', { action: 'resume' }); await waitTask('batch_next1', 'completed');
+  hold = false;
+  await send('queue-control', { action: 'resume' });
+  for (const id of ['batch_next1', 'batch_new01', 'batch_can01']) await waitTask(id, 'completed');
   // Closing the queue page does not own execution.
   hold = false;
   await send('enqueue', { entries: [entry('batch_last1')], quality: 'best' });
