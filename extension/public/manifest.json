@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube / Bilibili 本机下载",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "在 YouTube 或 Bilibili 视频下方选择清晰度，直接在浏览器内下载并合并音视频。",
   "minimum_chrome_version": "120",
   "icons": {

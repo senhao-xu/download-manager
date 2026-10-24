@@ -14,19 +14,23 @@ else {
   let currentId = ''; let host: HTMLElement | undefined; let widget: Pick<ReturnType<typeof createWidget>, 'setHidden' | 'destroy'> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let observedHost: HTMLElement | undefined; let observedToolbar: HTMLElement | undefined;
-  let stopped = false;
+  let stopped = false; let detailsReady = false; let navigating = false;
+  const titleSelectors = 'ytd-watch-metadata h1, ytd-video-primary-info-renderer h1, #watch-header h1, ytm-slim-video-metadata-renderer .slim-video-information-title, ytm-slim-video-information-renderer .slim-video-information-title';
   function visible(element: HTMLElement) {
     return !element.closest('[hidden]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
   }
   function syncFullscreen() {
     const fullscreen = !!document.fullscreenElement || document.body.classList.contains('webscreen-fix') || !!document.querySelector('#movie_player.ytp-fullscreen');
-    widget?.setHidden(fullscreen);
+    widget?.setHidden(fullscreen || !detailsReady || navigating);
     return fullscreen;
   }
   function fullscreenChange() { syncFullscreen(); schedule(); }
+  function navigationStart() { navigating = true; widget?.setHidden(true); }
+  function navigationFinish() { navigating = false; schedule(); }
   function mount() {
     timer = undefined;
     if (!valid()) { destroy(); return; }
+    if (navigating) return;
     let id = ''; let site = ''; let collectionUrl = '';
     try { const target = videoTarget(location.href); id = target.videoId; site = target.site; }
     catch {
@@ -34,11 +38,12 @@ else {
       catch { /* Not a supported video, collection or channel page. */ }
     }
     if (currentId !== id) {
-      widget?.destroy(); widget = undefined; host = undefined; currentId = id;
+      widget?.destroy(); widget = undefined; host = undefined; currentId = id; detailsReady = false;
       resize.disconnect(); observedHost = undefined; observedToolbar = undefined;
     }
     if (!id) return;
     if (collectionUrl) {
+      detailsReady = true;
       if (!host || !widget) {
         host = document.createElement('span'); host.id = 'yt-local-download-root';
         widget = createCollectionWidget(host, collectionUrl);
@@ -56,6 +61,19 @@ else {
     for (const selector of selectors) {
       target = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(visible);
       if (target) break;
+    }
+    // Player data can arrive while the watch page still shows its skeleton.
+    // Wait for the current video's rendered title and action row, rather than
+    // revealing the floating fallback before the native details initialize.
+    const metadata = target?.closest('ytd-watch-metadata');
+    const nativeId = metadata?.getAttribute('video-id') || target?.closest('ytd-watch-flexy')?.getAttribute('video-id');
+    const titles = metadata ? metadata.querySelectorAll<HTMLElement>('h1') : document.querySelectorAll<HTMLElement>(titleSelectors);
+    detailsReady = site !== 'youtube' || location.pathname.startsWith('/shorts/') || !!target && (!nativeId || nativeId === id)
+      && Array.from(titles).some(title => !!title.textContent?.trim() && visible(title));
+    if (!detailsReady) {
+      widget?.setHidden(true);
+      if (host && !host.isConnected) document.body.append(host);
+      return;
     }
     if (!host || !widget) {
       host = document.createElement('span'); host.id = 'yt-local-download-root';
@@ -108,7 +126,8 @@ else {
   function destroy() {
     if (stopped) return;
     stopped = true; clearTimeout(timer); observer.disconnect(); resize.disconnect();
-    document.removeEventListener('yt-navigate-finish', schedule);
+    document.removeEventListener('yt-navigate-start', navigationStart);
+    document.removeEventListener('yt-navigate-finish', navigationFinish);
     document.removeEventListener('fullscreenchange', fullscreenChange);
     window.removeEventListener('popstate', schedule); window.removeEventListener('resize', schedule);
     try { chrome.runtime.onMessage.removeListener(onMessage); } catch { /* The extension was uninstalled. */ }
@@ -117,16 +136,19 @@ else {
   }
   page.ytLocalDownload = { mount: schedule, valid, destroy };
   chrome.runtime.onMessage.addListener(onMessage);
-  document.addEventListener('yt-navigate-finish', schedule);
+  document.addEventListener('yt-navigate-start', navigationStart);
+  document.addEventListener('yt-navigate-finish', navigationFinish);
   document.addEventListener('fullscreenchange', fullscreenChange);
   window.addEventListener('popstate', schedule);
   window.addEventListener('resize', schedule);
   const observer = new MutationObserver(records => {
     if (records.some(record => record.type === 'attributes' && record.attributeName === 'class' && (record.target === document.body || record.target instanceof Element && record.target.matches('#movie_player')))) fullscreenChange();
     // Our own insertions/moves must not start a permanent observer loop.
-    if (records.some(record => record.type === 'attributes' ? record.attributeName !== 'class' : [...record.addedNodes, ...record.removedNodes].some(node => !(node instanceof Element && node.id === 'yt-local-download-root')))) schedule();
+    if (records.some(record => record.type === 'attributes' ? record.attributeName !== 'class'
+      : record.type === 'characterData' ? !!record.target.parentElement?.closest(titleSelectors)
+      : [...record.addedNodes, ...record.removedNodes].some(node => !(node instanceof Element && node.id === 'yt-local-download-root')))) schedule();
   });
   const resize = new ResizeObserver(schedule);
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['dark', 'is-active', 'hidden', 'class'] });
+  observer.observe(document.documentElement, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['dark', 'is-active', 'hidden', 'class', 'video-id'] });
   mount();
 }

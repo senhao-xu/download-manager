@@ -31,6 +31,7 @@ Version 0.3.0 fixes Shorts player detection and adds a batch manager for YouTube
 Version 0.3.1 adds on-page batch buttons on playlists/channels/collections and removes automatic tab creation from list reading and pagination; YouTube pagination reuses an already open YouTube page.
 Version 0.3.2 also covers Bilibili UP home/upload video pages and adds covers, resolved video dimensions and estimated/actual file sizes to batch lists and queues.
 Version 0.3.3 preserves paused queues when adding or retrying tasks and allows YouTube pagination to continue through pages containing only unplayable videos.
+Version 0.3.4 waits for the current YouTube video's title and action row before showing its download button, hiding it during loading and video navigation.
 
 The extension reuses the site's normal page login state; no cookie export is needed.
 A full public Bilibili 480P H.264/AAC MP4 (about 212 seconds) has been verified; real logged-in/premium-account quality remains unverified.

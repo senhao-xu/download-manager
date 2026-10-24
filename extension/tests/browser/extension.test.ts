@@ -69,7 +69,7 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) });
     }
     const native = sabrOnly ? { ...response, streamingData: { serverAbrStreamingUrl: 'https://fixture.googlevideo.com/videoplayback?id=sabr-only', adaptiveFormats: raw.formats.map(({ url, ...format }) => format) } } : response;
-    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<html><head><meta charset="utf-8"></head><body><div id="movie_player"></div><ytd-watch-metadata><div id="top-level-buttons-computed"></div></ytd-watch-metadata><script>window.ytInitialPlayerResponse=${fixtureReady ? JSON.stringify(native) : 'undefined'};window.fixtureReads=0;document.querySelector('#movie_player').getPlayerResponse=()=>{window.fixtureReads++;return window.ytInitialPlayerResponse;};</script></body></html>` });
+    return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<html><head><meta charset="utf-8"></head><body><div id="movie_player"></div><ytd-watch-metadata><h1>Fixture details</h1><div id="top-level-buttons-computed"></div></ytd-watch-metadata><script>window.ytInitialPlayerResponse=${fixtureReady ? JSON.stringify(native) : 'undefined'};window.fixtureReads=0;document.querySelector('#movie_player').getPlayerResponse=()=>{window.fixtureReads++;return window.ytInitialPlayerResponse;};</script></body></html>` });
   });
   const page = await context.newPage();
   await page.goto(`https://www.youtube.com/watch?v=${raw.videoId}`);
@@ -135,30 +135,30 @@ test('real MV3 package downloads, muxes, persists and cancels without a server',
   assert.equal(await inline.count(), 1);
   // Ignore a hidden old action row. Place the control after a translated Share.
   await page.evaluate(() => {
-    document.querySelector('ytd-watch-metadata')!.innerHTML = '<div id="top-level-buttons-computed" hidden></div><div id="top-level-buttons-computed" class="visible-actions"><span><button aria-label="分享视频">分享</button></span></div>';
+    document.querySelector('ytd-watch-metadata')!.innerHTML = '<h1>Fixture details</h1><div id="top-level-buttons-computed" hidden></div><div id="top-level-buttons-computed" class="visible-actions"><span><button aria-label="分享视频">分享</button></span></div>';
   });
   await page.locator('.visible-actions #yt-local-download-root').waitFor();
   assert.equal(await inline.evaluate(host => host.previousElementSibling?.querySelector('button')?.getAttribute('aria-label')), '分享视频');
-  // Alternative/new action layouts have a visible fallback. Missing metadata
-  // temporarily uses a floating control, then moves back when YouTube renders it.
-  await page.evaluate(() => { document.querySelector('ytd-watch-metadata')!.innerHTML = '<div id="actions-inner" style="display:flex"></div>'; });
+  // Alternative/new action layouts remain supported. Missing native details
+  // hide the control until YouTube renders the current video's action row.
+  await page.evaluate(() => { document.querySelector('ytd-watch-metadata')!.innerHTML = '<h1>Fixture details</h1><div id="actions-inner" style="display:flex"></div>'; });
   await page.locator('#actions-inner #yt-local-download-root').waitFor();
   await page.evaluate(() => document.querySelector('ytd-watch-metadata')!.remove());
-  await page.locator('#yt-local-download-root[data-floating]').waitFor();
-  assert.equal(await inline.getByRole('button', { name: '下载当前视频' }).isVisible(), true);
+  await page.locator('#yt-local-download-root[hidden]').waitFor({ state: 'attached' });
+  assert.equal(await inline.getByRole('button', { name: '下载当前视频' }).isVisible(), false);
   await page.bringToFront();
   await page.evaluate(() => document.documentElement.requestFullscreen());
   await page.locator('#yt-local-download-root[hidden]').waitFor({ state: 'attached' });
   assert.equal(await inline.isVisible(), false);
   await page.evaluate(() => document.exitFullscreen());
-  await page.locator('#yt-local-download-root[data-floating]:not([hidden])').waitFor();
+  assert.equal(await inline.isVisible(), false);
   await page.evaluate(() => document.querySelector('#movie_player')!.classList.add('ytp-fullscreen'));
   await page.locator('#yt-local-download-root[hidden]').waitFor({ state: 'attached' });
   assert.equal(await inline.isVisible(), false);
   await page.evaluate(() => document.querySelector('#movie_player')!.classList.remove('ytp-fullscreen'));
-  await page.locator('#yt-local-download-root[data-floating]:not([hidden])').waitFor();
-  await page.evaluate(() => { const metadata = document.createElement('ytd-watch-metadata'); metadata.innerHTML = '<div id="top-level-buttons-computed"></div>'; document.body.append(metadata); });
-  await page.locator('ytd-watch-metadata #yt-local-download-root:not([data-floating])').waitFor();
+  assert.equal(await inline.isVisible(), false);
+  await page.evaluate(() => { const metadata = document.createElement('ytd-watch-metadata'); metadata.innerHTML = '<h1>Fixture details</h1><div id="top-level-buttons-computed"></div>'; document.body.append(metadata); });
+  await page.locator('ytd-watch-metadata #yt-local-download-root:not([hidden])').waitFor();
   await inline.getByRole('button', { name: '选择下载清晰度' }).click();
   await inline.locator('.option').filter({ hasText: '90p' }).waitFor();
   await inline.locator('.option').filter({ hasText: '90p' }).click();
